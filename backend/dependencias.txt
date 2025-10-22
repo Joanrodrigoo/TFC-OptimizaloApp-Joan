@@ -1,0 +1,15 @@
+dependencias node 
+npm install dotenv
+npm install nodemailer
+npm install cors
+npm install express bcrypt
+npm install express-rate-limit
+npm install stripe
+
+
+
+
+dependencias react 
+ npm install @tanstack/react-query
+ npm install react-router-dom
+ npm install @stripe/stripe-js
