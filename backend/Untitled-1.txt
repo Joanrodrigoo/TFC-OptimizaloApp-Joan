@@ -1,0 +1,22 @@
+0|backend  | Cookies: undefined
+0|backend  | === INICIO DE SOLICITUD ===
+0|backend  | 🔍 Procesando Customer ID: 8849937100
+0|backend  | ✅ Conexión a BD establecida
+0|backend  | 🎯 Customer final a procesar: 9907486548
+0|backend  | ✅ Cliente de Google Ads inicializado
+0|backend  | 📅 Procesando fechas: 2025-08-24, 2025-08-25, 2025-08-26, 2025-08-27, 2025-08-28, 2025-08-29, 2025-08-30
+0|backend  | ❌ Error obteniendo campañas y ad groups: Xd {
+0|backend  |   errors: [
+0|backend  |     {
+0|backend  |       error_code: [Object],
+0|backend  |       message: "User doesn't have permission to access customer. Note: If you're accessing a client customer, the manager's customer id must be set in the 'login-customer-id' header. See https://developers.google.com/google-ads/api/docs/concepts/call-structure#cid"
+0|backend  |     }
+0|backend  |   ],
+0|backend  |   '@type': 'type.googleapis.com/google.ads.googleads.v19.errors.GoogleAdsFailure',    
+0|backend  |   request_id: 'Fgsw4Z9ewzlDt1fXLkcFqQ'
+0|backend  | }
+0|backend  | 📊 Encontradas 0 combinaciones campaign/adgroup
+
+
+# Crontab que crea el archivo si no existe
+0 9,21 * * * cd /root/apps/backend && node cron/checkTokens.js >> /var/log/token-monitor.log 2>&1 || touch /var/log/token-monitor.log
