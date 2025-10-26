@@ -1686,7 +1686,7 @@ const HierarchicalCampaignsList = ({
                             {assetGroup.clicks.toLocaleString()}
                           </TableCell>
                           <TableCell>{assetGroup.ctr.toFixed(2)}%</TableCell>
-                          <TableCell>{assetGroup.conversions}</TableCell>
+                          <TableCell>{assetGroup.conversions.toFixed(0)}</TableCell>
                           <TableCell>
                             {formatCurrency(assetGroup.conversionsValue)}
                           </TableCell>
