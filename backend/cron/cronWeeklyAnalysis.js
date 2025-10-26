@@ -1,4 +1,4 @@
-import mysql from 'mysql2/promise';
+import pool from './db.js'; // ✅ USAR EL POOL COMPARTIDO
 import dotenv from "dotenv";
 import fetch from 'node-fetch';
 import { createWeeklyAnalysisTask, cleanOldAnalysisTasks } from '../analysisQueue/analysisUtils.js';
@@ -7,27 +7,21 @@ dotenv.config();
 
 const API_BASE = 'http://localhost:3000';
 
-// 🔥 POOL INDEPENDIENTE PARA EL CRON (no afecta al pool principal del servidor)
-const cronPool = mysql.createPool({
-  host: '127.0.0.1',
-  user: 'adminuser',
-  password: 'adminpassword',
-  database: 'mi_saas',
-  waitForConnections: true,
-  connectionLimit: 5, // Menos conexiones que el pool principal
-  queueLimit: 0,
-});
+// ❌ ELIMINADO: cronPool independiente
+// ✅ AHORA USA EL POOL COMPARTIDO DE db.js
 
 async function main() {
   console.log('\n' + '='.repeat(80));
   console.log('🤖 INICIANDO CRON JOB - ANÁLISIS SEMANAL CON IA');
   console.log('='.repeat(80) + '\n');
 
+  let connection; // ✅ Variable para manejar la conexión
+
   try {
-    const connection = await cronPool.getConnection();
+    connection = await pool.getConnection(); // ✅ Obtener conexión del pool compartido
 
     // 1️⃣ Limpiar tareas antiguas (opcional)
-    await cleanOldAnalysisTasks(cronPool, 30); // 🔥 Pasar cronPool
+    await cleanOldAnalysisTasks(pool, 30); // ✅ Pasar pool compartido
 
     // 2️⃣ Obtener todas las cuentas activas (NO MCC)
     const [rows] = await connection.execute(`
@@ -44,8 +38,6 @@ async function main() {
       ORDER BY a.customer_id
     `);
 
-    connection.release();
-
     if (rows.length === 0) {
       console.log('⚠️ No se encontraron cuentas para analizar.');
       return;
@@ -55,7 +47,7 @@ async function main() {
 
     // 3️⃣ Crear tareas de análisis para cada cuenta
     console.log(`\n${'='.repeat(80)}`);
-    console.log('📥 PROGRAMANDO TAREAS DE ANÁLISIS');
+    console.log('🔥 PROGRAMANDO TAREAS DE ANÁLISIS');
     console.log('='.repeat(80) + '\n');
 
     const results = {
@@ -68,7 +60,7 @@ async function main() {
       const { customer_id, name } = row;
       
       try {
-        const result = await createWeeklyAnalysisTask(cronPool, customer_id); // 🔥 Pasar cronPool
+        const result = await createWeeklyAnalysisTask(pool, customer_id); // ✅ Pasar pool compartido
         
         if (result.created) {
           console.log(`✅ ${customer_id} (${name}): Análisis programado`);
@@ -134,8 +126,12 @@ async function main() {
     console.error('❌ Error general en cron job:', error.message);
     throw error;
   } finally {
-    // 🔥 CERRAR SOLO EL POOL DEL CRON (no afecta al pool del servidor)
-    await cronPool.end();
+    // ✅ LIBERAR LA CONEXIÓN AL POOL (NO CERRAR EL POOL)
+    if (connection) {
+      connection.release();
+      console.log('🔓 Conexión liberada al pool');
+    }
+    // ❌ NO HACER: await pool.end();
   }
 }
 

@@ -32,6 +32,13 @@ import {
   createWeeklyAnalysisTask,
   getAnalysisStatus,
 } from "./analysisQueue/analysisUtils.js";
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import pool from './db.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -93,18 +100,6 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// MariaDB pool
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || "127.0.0.1",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "root",
-  database: process.env.DB_NAME || "mi_saas",
-  waitForConnections: true,
-  connectionLimit: 30, // ✅ Aumentado de 10 a 30
-  queueLimit: 0,
-  enableKeepAlive: true, // ✅ Nuevo
-  keepAliveInitialDelay: 0, // ✅ Nuevo
-});
 
 // ============================================
 // CIRCUIT BREAKER PARA GOOGLE ADS API
@@ -170,6 +165,166 @@ const analysisQueue = new AnalysisQueueManager(pool, {
 });
 
 console.log("🤖 Sistema de análisis con IA inicializado");
+
+// Crear carpeta de logs si no existe
+const logsDir = path.join(__dirname, 'logs');
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir, { recursive: true });
+}
+
+// ============================================
+// FUNCIONES DE LOGGING SIMPLES
+// ============================================
+
+function getLogFilename(type) {
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  return path.join(logsDir, `${type}-${today}.log`);
+}
+
+function writeToLog(type, data) {
+  try {
+    const timestamp = new Date().toISOString();
+    const logFile = getLogFilename(type);
+    const logEntry = `
+${'='.repeat(80)}
+[${timestamp}]
+${typeof data === 'object' ? JSON.stringify(data, null, 2) : data}
+${'='.repeat(80)}
+
+`;
+    fs.appendFileSync(logFile, logEntry, 'utf8');
+  } catch (error) {
+    console.error('Error escribiendo log:', error);
+  }
+}
+
+function logQueryError(context, query, error, customerObj) {
+  const errorData = {
+    timestamp: new Date().toISOString(),
+    context: {
+      name: context.name || 'unknown',
+      customer_id: context.customer_id || customerObj?.customer_id || customerObj?.customerId || 'unknown',
+      campaign_id: context.campaign_id || null,
+      ad_group_id: context.ad_group_id || null,
+      date: context.date || null,
+    },
+    query: query.substring(0, 500) + (query.length > 500 ? '...' : ''), // Limitar tamaño
+    error: {
+      message: error.message || String(error),
+      code: error.code || null,
+      type: error.constructor.name,
+      stack: error.stack ? error.stack.substring(0, 1000) : null,
+    }
+  };
+  
+  writeToLog('google-ads-query-errors', errorData);
+  return errorData;
+}
+
+function logCircuitBreakerEvent(event, details = {}) {
+  const eventData = {
+    timestamp: new Date().toISOString(),
+    event,
+    failureCount: googleAdsFailureCount,
+    isOpen: googleAdsCircuitOpen,
+    ...details
+  };
+  
+  writeToLog('circuit-breaker', eventData);
+  console.log(`🔴 Circuit Breaker: ${event}`);
+}
+
+function logSyncError(customerId, phase, error, additionalData = {}) {
+  const errorData = {
+    timestamp: new Date().toISOString(),
+    customer_id: customerId,
+    phase,
+    error: {
+      message: error.message || String(error),
+      code: error.code || null,
+      type: error.constructor.name,
+      stack: error.stack ? error.stack.substring(0, 1000) : null,
+    },
+    ...additionalData
+  };
+  
+  writeToLog('sync-errors', errorData);
+}
+
+// Endpoint para listar archivos de log
+app.get('/api/logs/list', (req, res) => {
+  try {
+    const files = fs.readdirSync(logsDir)
+      .filter(file => file.endsWith('.log'))
+      .map(file => ({
+        name: file,
+        size: fs.statSync(path.join(logsDir, file)).size,
+        modified: fs.statSync(path.join(logsDir, file)).mtime
+      }))
+      .sort((a, b) => b.modified - a.modified);
+    
+    res.json({ files });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Endpoint para leer un archivo de log específico
+app.get('/api/logs/:filename', (req, res) => {
+  try {
+    const { filename } = req.params;
+    const { lines = 100 } = req.query; // Por defecto últimas 100 líneas
+    
+    const filePath = path.join(logsDir, filename);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Archivo no encontrado' });
+    }
+    
+    const content = fs.readFileSync(filePath, 'utf8');
+    const allLines = content.split('\n');
+    const lastLines = allLines.slice(-parseInt(lines));
+    
+    res.json({
+      filename,
+      totalLines: allLines.length,
+      displayedLines: lastLines.length,
+      content: lastLines.join('\n')
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Endpoint para limpiar logs antiguos (más de 30 días)
+app.delete('/api/logs/cleanup', (req, res) => {
+  try {
+    const now = Date.now();
+    const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
+    
+    const files = fs.readdirSync(logsDir);
+    let deleted = 0;
+    
+    files.forEach(file => {
+      const filePath = path.join(logsDir, file);
+      const stats = fs.statSync(filePath);
+      
+      if (stats.mtime.getTime() < thirtyDaysAgo) {
+        fs.unlinkSync(filePath);
+        deleted++;
+      }
+    });
+    
+    res.json({ 
+      message: `${deleted} archivos eliminados`,
+      deleted 
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
 
 // =============== ENDPOINTS PRINCIPALES =================
 
@@ -774,7 +929,9 @@ async function getCampaignLanguages(customer, customerId, campaignId) {
       baseDelay: 500,
       context: {
         name: "getCampaignLanguages",
+        customer_id: customerId,
         campaign_id: campaignId,
+        date: null,
       },
     }
   );
@@ -802,7 +959,9 @@ async function getCampaignLanguages(customer, customerId, campaignId) {
       baseDelay: 500,
       context: {
         name: "getCampaignLanguages_constants",
+        customer_id: customerId,
         campaign_id: campaignId,
+        date: null,
       },
     }
   );
@@ -875,7 +1034,9 @@ async function getCampaignLocations(customer, customerId, campaignId) {
       baseDelay: 500,
       context: {
         name: "getCampaignLocations",
+        customer_id: customerId,
         campaign_id: campaignId,
+        date: null,
       },
     }
   );
@@ -905,7 +1066,9 @@ async function getCampaignLocations(customer, customerId, campaignId) {
       baseDelay: 500,
       context: {
         name: "getCampaignLocations_constants",
+        customer_id: customerId,
         campaign_id: campaignId,
+        date: null,
       },
     }
   );
@@ -1664,19 +1827,25 @@ async function saveCampaignMetricsHistory(customerId, campaigns, date) {
 // ✅ VERSIÓN MEJORADA - NO LANZA ERRORES, DEVUELVE ARRAY VACÍO
 
 async function safeQuery(customerObj, query, opts = {}) {
-// ⚙️ Configuración óptima de safeQuery
-const retries = opts.retries ?? 3;        // Hasta 3 reintentos automáticos
-const baseDelay = opts.baseDelay ?? 600;  // Pausa ligera entre reintentos
-const throwOnError = opts.throwOnError ?? false;
-const context = opts.context || {};
-const timeoutMs = opts.timeout || 30000;  // 30s de timeout por query
-
+  // ✅ Configuración reducida para evitar bloqueos
+  const retries = opts.retries ?? 1;
+  const baseDelay = opts.baseDelay ?? 300;
+  const throwOnError = opts.throwOnError ?? false;
+  const context = opts.context || {};
+  const timeoutMs = opts.timeout || 10000;
+  
+  // ✅ Nombre del contexto con fallback
+  const contextName = context.name || 'unknown_query';
   
   // ✅ Verificar circuit breaker
   try {
     checkCircuitBreaker();
   } catch (err) {
-    console.warn(`⚠️ [${context.name}] Circuit breaker activo - Saltando query`);
+    console.warn(`⚠️ [${contextName}] Circuit breaker activo - Saltando query`);
+    
+    // 📝 Log del evento
+    logQueryError(context, query, err, customerObj);
+    
     if (throwOnError) throw err;
     return [];
   }
@@ -1687,10 +1856,14 @@ const timeoutMs = opts.timeout || 30000;  // 30s de timeout por query
       ? (customerObj.customer_id || customerObj.customerId || 'unknown') 
       : 'no-customer';
     
-    console.warn(`⚠️ [safeQuery] Cliente inválido: ${info} - ${context.name || 'query'}`);
+    const validationError = new Error(`Cliente inválido o sin método query para customer ${info}`);
+    console.warn(`⚠️ [safeQuery] Cliente inválido: ${info} - ${contextName}`);
+    
+    // 📝 Log del error de validación
+    logQueryError(context, query, validationError, customerObj);
     
     if (throwOnError) {
-      throw new Error(`Cliente inválido o sin método query para customer ${info}`);
+      throw validationError;
     }
     return [];
   }
@@ -1704,7 +1877,7 @@ const timeoutMs = opts.timeout || 30000;  // 30s de timeout por query
       const clientInfo = customerObj.customer_id ?? customerObj.customerId ?? 'unknown';
       
       if (attempt === 1) {
-        console.log(`🔎 [${context.name || 'query'}] customer=${clientInfo} date=${context.date || 'N/A'}`);
+        console.log(`🔎 [${contextName}] customer=${clientInfo} date=${context.date || 'N/A'}`);
       } else {
         console.log(`      🔄 Intento ${attempt}/${retries} customer=${clientInfo}`);
       }
@@ -1719,12 +1892,12 @@ const timeoutMs = opts.timeout || 30000;  // 30s de timeout por query
 
       // ✅ VALIDAR RESPUESTA
       if (!res) {
-        console.warn(`⚠️ [${context.name}] Respuesta null/undefined - Devolviendo array vacío`);
+        console.warn(`⚠️ [${contextName}] Respuesta null/undefined - Devolviendo array vacío`);
         return [];
       }
 
       if (!Array.isArray(res)) {
-        console.warn(`⚠️ [${context.name}] Respuesta no es array (tipo: ${typeof res}) - Devolviendo array vacío`);
+        console.warn(`⚠️ [${contextName}] Respuesta no es array (tipo: ${typeof res}) - Devolviendo array vacío`);
         return [];
       }
 
@@ -1732,9 +1905,9 @@ const timeoutMs = opts.timeout || 30000;  // 30s de timeout por query
       recordGoogleAdsSuccess();
       
       if (res.length === 0 && attempt === 1) {
-        console.log(`ℹ️ [${context.name}] Sin datos disponibles`);
+        console.log(`ℹ️ [${contextName}] Sin datos disponibles`);
       } else if (res.length > 0) {
-        console.log(`✅ [${context.name}] ${res.length} filas obtenidas`);
+        console.log(`✅ [${contextName}] ${res.length} filas obtenidas`);
       }
 
       return res;
@@ -1749,12 +1922,19 @@ const timeoutMs = opts.timeout || 30000;  // 30s de timeout por query
       const errorType = classifyError(err, msg, code);
       
       console.warn(
-        `⚠️ [${context.name}] Intento ${attempt}/${retries} - ${errorType}: ${msg.split('\n')[0].substring(0, 100)}`
+        `⚠️ [${contextName}] Intento ${attempt}/${retries} - ${errorType}: ${msg.split('\n')[0].substring(0, 100)}`
       );
+
+      // 📝 Log del error (solo en el último intento para evitar duplicados)
+      if (attempt >= retries) {
+        logQueryError(context, query, err, customerObj);
+      }
 
       // ✅ ERRORES NO RECUPERABLES - NO REINTENTAR
       if (errorType === 'NON_RETRYABLE') {
         console.warn(`  → Error no recuperable, saltando...`);
+        // 📝 Log del error no recuperable
+        logQueryError(context, query, err, customerObj);
         break;
       }
 
@@ -1776,7 +1956,7 @@ const timeoutMs = opts.timeout || 30000;  // 30s de timeout por query
     throw lastError || new Error('Query failed after retries');
   }
 
-  console.warn(`⚠️ [${context.name}] Query falló - Continuando con array vacío`);
+  console.warn(`⚠️ [${contextName}] Query falló - Continuando con array vacío`);
   return [];
 }
 
@@ -2707,7 +2887,9 @@ app.get("/api/google-ads-pmax", async (req, res) => {
       login_customer_id: process.env.MCC_ID,
     });
 
-    // 3️⃣ Campañas Performance Max
+    const today = new Date().toISOString().split("T")[0];
+
+    // ✅ 3️⃣ Campañas Performance Max
     const queryCampaigns = `
       SELECT
         campaign.id,
@@ -2731,11 +2913,20 @@ app.get("/api/google-ads-pmax", async (req, res) => {
         AND campaign.status = 'ENABLED'
       LIMIT 50
     `;
-    const campaigns = await customer.query(queryCampaigns);
+    
+    const campaigns = await safeQuery(customer, queryCampaigns, {
+      retries: 3,
+      baseDelay: 500,
+      context: {
+        name: "pmax_campaigns",
+        customer_id: customer_id,
+        date: today,
+      },
+    });
+
     if (!campaigns?.length)
       return res.send(`<h3>⚠️ No se encontraron campañas PMax activas</h3>`);
 
-    const today = new Date().toISOString().split("T")[0];
 
     // 4️⃣ Guardar campañas
     for (const c of campaigns) {
@@ -2779,7 +2970,7 @@ app.get("/api/google-ads-pmax", async (req, res) => {
       );
     }
 
-    // 5️⃣ Asset Groups
+    // ✅ 5️⃣ Asset Groups
     const queryAssetGroups = `
       SELECT
         asset_group.id,
@@ -2794,7 +2985,17 @@ app.get("/api/google-ads-pmax", async (req, res) => {
       WHERE asset_group.status = 'ENABLED'
       LIMIT 100
     `;
-    const assetGroups = await customer.query(queryAssetGroups);
+    
+    const assetGroups = await safeQuery(customer, queryAssetGroups, {
+      retries: 3,
+      baseDelay: 500,
+      context: {
+        name: "pmax_asset_groups",
+        customer_id: customer_id,
+        date: today,
+      },
+    });
+
     for (const ag of assetGroups) {
       await pool.query(
         `INSERT INTO asset_groups (
@@ -2822,7 +3023,7 @@ app.get("/api/google-ads-pmax", async (req, res) => {
       );
     }
 
-    // 6️⃣ Assets con métricas (💪 con asset_id seguro)
+     // ✅ 6️⃣ Assets con métricas
     const queryAssets = `
       SELECT
         asset_group_asset.asset_group,
@@ -2840,7 +3041,16 @@ app.get("/api/google-ads-pmax", async (req, res) => {
       WHERE asset_group_asset.status = 'ENABLED'
       LIMIT 300
     `;
-    const assets = await customer.query(queryAssets);
+    
+    const assets = await safeQuery(customer, queryAssets, {
+      retries: 3,
+      baseDelay: 500,
+      context: {
+        name: "pmax_assets",
+        customer_id: customer_id,
+        date: today,
+      },
+    });
 
     for (const a of assets) {
       // ✅ Extraer asset_group_id
@@ -2909,11 +3119,7 @@ app.get("/api/google-ads-pmax", async (req, res) => {
       );
     }
 
-    // 7️⃣ Actualizar URLs de imagen (solo si tienen asset_id)
-    const imageAssetIds = assets
-      .filter(a => a.asset_group_asset?.asset)
-      .map(a => a.asset_group_asset.asset.split("/").pop());
-
+    // ✅ 7️⃣ Actualizar URLs de imagen
     if (imageAssetIds.length > 0) {
       const ids = imageAssetIds.map(id => `'${id}'`).join(",");
       const queryImages = `
@@ -2921,7 +3127,16 @@ app.get("/api/google-ads-pmax", async (req, res) => {
         FROM asset
         WHERE asset.id IN (${ids})
       `;
-      const imageRows = await customer.query(queryImages);
+      
+      const imageRows = await safeQuery(customer, queryImages, {
+        retries: 2,
+        baseDelay: 400,
+        context: {
+          name: "pmax_asset_images",
+          customer_id: customer_id,
+          date: today,
+        },
+      });
 
       for (const img of imageRows) {
         const imageUrl = img.asset?.image_asset?.full_size?.url || null;
@@ -3082,7 +3297,7 @@ app.get("/oauth2callback", async (req, res) => {
           refresh_token,
         });
 
-        // ✅ Query a Google Ads (sin conexión MySQL abierta)
+        // ✅ CORREGIDO: Con contexto completo
         const infoResult = await safeQuery(
           customer,
           `
@@ -3097,6 +3312,7 @@ app.get("/oauth2callback", async (req, res) => {
             context: {
               name: "oauth_customer_info",
               customer_id: customerIdClean,
+              date: null,
             },
           }
         );
@@ -3142,7 +3358,7 @@ app.get("/oauth2callback", async (req, res) => {
             `🏢 Consultando subcuentas de MCC ${customerIdClean} (${nombre})...`
           );
 
-          // ✅ Query subcuentas de Google Ads (sin conexión MySQL)
+          // ✅ CORREGIDO: Con contexto completo
           const accounts = await safeQuery(
             customer,
             `
@@ -3159,7 +3375,9 @@ app.get("/oauth2callback", async (req, res) => {
               throwOnError: false,
               context: {
                 name: "oauth_mcc_subaccounts",
+                customer_id: customerIdClean,
                 mcc_id: customerIdClean,
+                date: null,
               },
             }
           );
@@ -3502,8 +3720,8 @@ app.get("/api/test-google-ads-access/:customerId", async (req, res) => {
     
     console.log(`🧪 Probando acceso a cuenta ${customerId} (${account[0].name})...`);
     
-    // Query 1: Info básica del customer
-    const customerInfo = await customer.query(`
+// ✅ Query 1: Info básica del customer
+    const customerInfo = await safeQuery(customer, `
       SELECT 
         customer.id,
         customer.descriptive_name,
@@ -3512,12 +3730,20 @@ app.get("/api/test-google-ads-access/:customerId", async (req, res) => {
         customer.status
       FROM customer
       LIMIT 1
-    `);
+    `, {
+      retries: 2,
+      baseDelay: 300,
+      context: {
+        name: "test_customer_info",
+        customer_id: customerId,
+        date: null,
+      },
+    });
     
     console.log(`   ✅ Acceso a customer exitoso`);
     
-    // Query 2: Campañas activas (sin métricas)
-    const campaigns = await customer.query(`
+    // ✅ Query 2: Campañas activas (sin métricas)
+    const campaigns = await safeQuery(customer, `
       SELECT 
         campaign.id,
         campaign.name,
@@ -3527,12 +3753,20 @@ app.get("/api/test-google-ads-access/:customerId", async (req, res) => {
       WHERE campaign.status = 'ENABLED'
         AND campaign.experiment_type = 'BASE'
       LIMIT 10
-    `);
+    `, {
+      retries: 2,
+      baseDelay: 300,
+      context: {
+        name: "test_campaigns_enabled",
+        customer_id: customerId,
+        date: null,
+      },
+    });
     
     console.log(`   📊 Campañas activas encontradas: ${campaigns.length}`);
     
-    // Query 3: Cualquier campaña (incluso pausadas)
-    const allCampaigns = await customer.query(`
+    // ✅ Query 3: Cualquier campaña (incluso pausadas)
+    const allCampaigns = await safeQuery(customer, `
       SELECT 
         campaign.id,
         campaign.name,
@@ -3540,7 +3774,15 @@ app.get("/api/test-google-ads-access/:customerId", async (req, res) => {
         campaign.advertising_channel_type
       FROM campaign
       LIMIT 10
-    `);
+    `, {
+      retries: 2,
+      baseDelay: 300,
+      context: {
+        name: "test_campaigns_all",
+        customer_id: customerId,
+        date: null,
+      },
+    });
     
     console.log(`   📊 Campañas totales: ${allCampaigns.length}`);
     
@@ -3551,7 +3793,6 @@ app.get("/api/test-google-ads-access/:customerId", async (req, res) => {
     const sevenDaysAgo = new Date(today);
     sevenDaysAgo.setDate(today.getDate() - 7);
     
-    // 🔥 CORREGIDO: Usar BETWEEN con segments.date
     const dateFrom = sevenDaysAgo.toISOString().split('T')[0];
     const dateTo = yesterday.toISOString().split('T')[0];
     
@@ -3561,7 +3802,8 @@ app.get("/api/test-google-ads-access/:customerId", async (req, res) => {
     let metricsError = null;
     
     try {
-      metricsTest = await customer.query(`
+      // ✅ Con contexto completo
+      metricsTest = await safeQuery(customer, `
         SELECT 
           campaign.id,
           campaign.name,
@@ -3572,7 +3814,15 @@ app.get("/api/test-google-ads-access/:customerId", async (req, res) => {
         WHERE campaign.status = 'ENABLED'
           AND campaign.experiment_type = 'BASE'
           AND segments.date BETWEEN '${dateFrom}' AND '${dateTo}'
-      `);
+      `, {
+        retries: 2,
+        baseDelay: 300,
+        context: {
+          name: "test_metrics_7d",
+          customer_id: customerId,
+          date: `${dateFrom} to ${dateTo}`,
+        },
+      });
       
       totalImpressions = metricsTest.reduce((sum, c) => sum + (c.metrics?.impressions || 0), 0);
       totalClicks = metricsTest.reduce((sum, c) => sum + (c.metrics?.clicks || 0), 0);
@@ -3585,7 +3835,7 @@ app.get("/api/test-google-ads-access/:customerId", async (req, res) => {
       metricsError = metricsErr.message;
       console.warn(`   ⚠️ No se pudieron obtener métricas:`, metricsErr.message);
     }
-    
+
     // Query 5: Verificar datos en tu base de datos
     const [dbMetrics] = await pool.execute(`
       SELECT 
