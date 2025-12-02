@@ -60,8 +60,8 @@ router.post('/create-checkout-session', async (req, res) => {
           quantity: 1
         }
       ],
-      success_url: 'https://pwi.es/subscription/success',
-      cancel_url: 'https://pwi.es/subscription/canceled',
+      success_url: 'https://optimizalo.app/subscription/success',
+      cancel_url: 'https://optimizalo.app/subscription/canceled',
     });
 
     res.json({ url: session.url });

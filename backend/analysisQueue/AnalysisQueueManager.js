@@ -1,4 +1,5 @@
 // analysisQueue/AnalysisQueueManager.js
+// OPTIMIZADO: Gestión eficiente de conexiones MySQL para operaciones largas con IA
 
 import fetch from 'node-fetch';
 
@@ -58,7 +59,7 @@ export default class AnalysisQueueManager {
    */
   async processQueue() {
     while (this.isRunning) {
-      // Obtener tareas pendientes
+      // ✅ Obtener tareas pendientes (usa pool.execute directamente)
       const [pendingTasks] = await this.pool.execute(
         `SELECT * FROM analysis_queue 
          WHERE status = 'pending' 
@@ -87,6 +88,7 @@ export default class AnalysisQueueManager {
 
   /**
    * Procesa una tarea individual
+   * CRÍTICO: Libera conexión MySQL durante operaciones largas de IA
    */
   async processTask(task) {
     const customerId = task.customer_id;
@@ -96,7 +98,7 @@ export default class AnalysisQueueManager {
     console.log(`   📊 Intento: ${task.attempts + 1}/${task.max_attempts}`);
 
     try {
-      // Marcar como en proceso
+      // ✅ PASO 1: Marcar como procesando (usa pool.execute directamente)
       await this.pool.execute(
         `UPDATE analysis_queue 
          SET status = 'processing', 
@@ -105,23 +107,26 @@ export default class AnalysisQueueManager {
          WHERE id = ?`,
         [task.id]
       );
+      
+      // ⚡ CRÍTICO: La conexión se libera automáticamente aquí
+      // Ahora podemos hacer la operación larga sin bloquear el pool
 
-      // Llamar al endpoint de análisis
+      // ✅ PASO 2: Llamar al endpoint de análisis (operación larga, sin conexión MySQL)
       const startTime = Date.now();
-// Timeout global por si el endpoint se cuelga
-const controller = new AbortController();
-const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min
+      
+      // Timeout de seguridad por si el endpoint se cuelga
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10 * 60 * 1000); // 10 minutos
 
-const response = await fetch(
-  `${this.apiBase}/api/analyze?customerId=${encodeURIComponent(customerId)}`,
-  {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-    signal: controller.signal
-  }
-);
-clearTimeout(timeout);
-
+      const response = await fetch(
+        `${this.apiBase}/api/analyze?customerId=${encodeURIComponent(customerId)}`,
+        {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal
+        }
+      );
+      clearTimeout(timeout);
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
@@ -143,7 +148,7 @@ clearTimeout(timeout);
       console.log(`✅ [${task.id}] Análisis completado en ${duration}s`);
       console.log(`   💡 Recomendaciones generadas: ${recommendations.length}`);
 
-      // Marcar como completada
+      // ✅ PASO 3: Actualizar resultado (nueva conexión automática del pool)
       await this.pool.execute(
         `UPDATE analysis_queue 
          SET status = 'completed', 
@@ -159,31 +164,36 @@ clearTimeout(timeout);
     } catch (error) {
       console.error(`❌ [${task.id}] Error procesando análisis:`, error.message);
 
-      // Verificar si debe reintentar
-      if (task.attempts + 1 < task.max_attempts) {
-        console.log(`   🔄 Reintentará automáticamente (${task.attempts + 2}/${task.max_attempts})`);
-        
-        await this.pool.execute(
-          `UPDATE analysis_queue 
-           SET status = 'pending',
-               error_message = ?,
-               last_error_at = NOW()
-           WHERE id = ?`,
-          [error.message, task.id]
-        );
-      } else {
-        console.log(`   ⛔ Máximo de intentos alcanzado, marcando como fallida`);
-        
-        await this.pool.execute(
-          `UPDATE analysis_queue 
-           SET status = 'failed',
-               error_message = ?,
-               completed_at = NOW()
-           WHERE id = ?`,
-          [error.message, task.id]
-        );
+      // ✅ Actualizar error (usa pool.execute directamente)
+      try {
+        // Verificar si debe reintentar
+        if (task.attempts + 1 < task.max_attempts) {
+          console.log(`   🔄 Reintentará automáticamente (${task.attempts + 2}/${task.max_attempts})`);
+          
+          await this.pool.execute(
+            `UPDATE analysis_queue 
+             SET status = 'pending',
+                 error_message = ?,
+                 last_error_at = NOW()
+             WHERE id = ?`,
+            [error.message.substring(0, 500), task.id]
+          );
+        } else {
+          console.log(`   ⛔ Máximo de intentos alcanzado, marcando como fallida`);
+          
+          await this.pool.execute(
+            `UPDATE analysis_queue 
+             SET status = 'failed',
+                 error_message = ?,
+                 completed_at = NOW()
+             WHERE id = ?`,
+            [error.message.substring(0, 500), task.id]
+          );
 
-        this.failedCount++;
+          this.failedCount++;
+        }
+      } catch (updateError) {
+        console.error(`❌ Error actualizando estado en BD:`, updateError.message);
       }
     } finally {
       // Remover de procesando

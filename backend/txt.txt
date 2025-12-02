@@ -1,3 +1,44 @@
 %2S8gK9IY%1(
         209.38.241.240
     root 
+SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE accounts;
+    
+
+
+TRUNCATE TABLE ad_assets_history;
+TRUNCATE TABLE ad_groups;
+TRUNCATE TABLE ads;
+TRUNCATE TABLE analysis_queue;
+TRUNCATE TABLE asset_group_assets;
+TRUNCATE TABLE asset_groups;
+TRUNCATE TABLE audience_segments;
+TRUNCATE TABLE campaign_languages;
+TRUNCATE TABLE campaign_locations;
+TRUNCATE TABLE campaign_metrics_history;
+TRUNCATE TABLE campaign_segment_metrics;
+TRUNCATE TABLE keywords;
+TRUNCATE TABLE password_resets;
+TRUNCATE TABLE pending_users;
+TRUNCATE TABLE pmax_resource_metrics_history;
+TRUNCATE TABLE recomendaciones;
+TRUNCATE TABLE search_terms;
+TRUNCATE TABLE sessions;
+TRUNCATE TABLE subscriptions;
+TRUNCATE TABLE sync_queue;
+TRUNCATE TABLE token_notifications;
+TRUNCATE TABLE tokens;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+
+SELECT 
+        COUNT(*) as totalTasks,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) as processing,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+        MIN(start_date) as startDate,
+        MAX(end_date) as endDate
+      FROM sync_queue
+      WHERE customer_id = "4586243911";

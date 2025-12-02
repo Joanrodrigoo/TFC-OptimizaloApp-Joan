@@ -1,26 +1,149 @@
-import pool from './db.js'; // ✅ USAR EL POOL COMPARTIDO
+// ========================================
+// CRON JOB FINAL - SINCRONIZACIÓN DIARIA
+// Versión 3.0 - Con soporte para cuentas hijas usando token del MCC padre
+// ========================================
+
+import pool from '../db.js';
 import dotenv from "dotenv";
 import fetch from 'node-fetch';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-const API_BASE = 'http://localhost:3000';
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
-// ❌ ELIMINADO: cronPool independiente
-// ✅ AHORA USA EL POOL COMPARTIDO DE db.js
+const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000';
+const LOG_DIR = path.join(__dirname, 'logs');
+
+// ========================================
+// CONFIGURACIÓN
+// ========================================
+const CONFIG = {
+  FETCH_TIMEOUT: 30000,
+  MAX_RETRIES: 3,
+  RETRY_DELAY: 2000,
+  SERVER_CHECK_TIMEOUT: 10000,
+};
+
+// ========================================
+// UTILIDADES
+// ========================================
+
+if (!fs.existsSync(LOG_DIR)) {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+}
+
+function log(message, level = 'INFO') {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] [${level}] ${message}`;
+  console.log(logMessage);
+  
+  const logFile = path.join(LOG_DIR, `cron-${new Date().toISOString().split('T')[0]}.log`);
+  fs.appendFileSync(logFile, logMessage + '\n', 'utf8');
+}
+
+async function fetchWithTimeout(url, options = {}, timeout = CONFIG.FETCH_TIMEOUT) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeout}ms`);
+    }
+    throw error;
+  }
+}
+
+async function retryWithBackoff(fn, maxRetries = CONFIG.MAX_RETRIES) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      
+      const delay = CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1);
+      log(`Intento ${attempt}/${maxRetries} falló, reintentando en ${delay}ms...`, 'WARN');
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
+async function checkServerHealth() {
+  try {
+    const response = await fetchWithTimeout(
+      `${API_BASE}/api/health`,
+      { method: 'GET' },
+      CONFIG.SERVER_CHECK_TIMEOUT
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Server returned ${response.status}`);
+    }
+    
+    return true;
+  } catch (error) {
+    throw new Error(`Servidor no disponible en ${API_BASE}: ${error.message}`);
+  }
+}
+
+// ========================================
+// VALIDACIÓN DE CREDENCIALES
+// ========================================
+
+function validateOAuthCredentials() {
+  const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+  const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+  
+  const issues = [];
+  
+  if (!CLIENT_ID) {
+    issues.push('GOOGLE_CLIENT_ID no está configurado');
+  } else if (!CLIENT_ID.includes('.apps.googleusercontent.com')) {
+    issues.push('GOOGLE_CLIENT_ID tiene formato incorrecto');
+  }
+  
+  if (!CLIENT_SECRET) {
+    issues.push('GOOGLE_CLIENT_SECRET no está configurado');
+  } else if (CLIENT_SECRET.length < 20) {
+    issues.push('GOOGLE_CLIENT_SECRET parece incorrecto (muy corto)');
+  }
+  
+  return {
+    valid: issues.length === 0,
+    issues,
+    clientId: CLIENT_ID ? `${CLIENT_ID.substring(0, 20)}...` : 'NO CONFIGURADO',
+  };
+}
+
+// ========================================
+// FUNCIONES PRINCIPALES
+// ========================================
 
 const isTokenExpiring = (expiry) => {
   if (!expiry) return true;
   const now = new Date();
   const expiryTime = new Date(expiry);
-  return (expiryTime - now) < 5 * 60 * 1000; // menos de 5 minutos
+  return (expiryTime - now) < 5 * 60 * 1000;
 };
 
 const renewAccessToken = async (refreshToken) => {
   const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
   const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
   
-  const res = await fetch('https://oauth2.googleapis.com/token', {
+  const res = await fetchWithTimeout('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -43,95 +166,246 @@ const renewAccessToken = async (refreshToken) => {
   };
 };
 
-async function main() {
-  console.log('\n' + '='.repeat(80));
-  console.log('🕐 INICIANDO CRON JOB - SINCRONIZACIÓN DIARIA');
-  console.log('='.repeat(80) + '\n');
+async function scheduleTaskForAccount(customerId) {
+  return retryWithBackoff(async () => {
+    const response = await fetchWithTimeout(`${API_BASE}/api/start-daily-sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customerId })
+    });
 
-  let connection; // ✅ Variable para manejar la conexión
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || response.statusText);
+    }
+
+    return data;
+  });
+}
+
+async function startSyncQueue() {
+  return retryWithBackoff(async () => {
+    const response = await fetchWithTimeout(`${API_BASE}/api/start-sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || response.statusText);
+    }
+
+    return data;
+  });
+}
+
+// ========================================
+// FUNCIÓN PRINCIPAL
+// ========================================
+
+async function main() {
+  const startTime = Date.now();
+  
+  log('='.repeat(80));
+  log('🕐 INICIANDO CRON JOB - SINCRONIZACIÓN DIARIA');
+  log('   Versión 3.0 - Con soporte para cuentas hijas de MCC');
+  log('='.repeat(80));
+
+  let connection;
 
   try {
-    connection = await pool.getConnection(); // ✅ Obtener conexión del pool compartido
+    // 0️⃣ VALIDAR CREDENCIALES
+    log('🔑 Validando credenciales de Google OAuth...');
+    const credValidation = validateOAuthCredentials();
+    
+    if (!credValidation.valid) {
+      log('❌ CREDENCIALES INCORRECTAS:', 'ERROR');
+      credValidation.issues.forEach(issue => log(`   ⚠️  ${issue}`, 'ERROR'));
+      throw new Error('Credenciales de OAuth incorrectas');
+    }
+    
+    log(`✅ Credenciales válidas (Client ID: ${credValidation.clientId})`, 'SUCCESS');
 
-    // 1️⃣ Obtener todas las cuentas activas (NO MCC)
+    // 1️⃣ VERIFICAR SERVIDOR
+    log('🔍 Verificando disponibilidad del servidor...');
+    await checkServerHealth();
+    log('✅ Servidor disponible y funcionando', 'SUCCESS');
+
+    // 2️⃣ OBTENER CONEXIÓN
+    log('🔌 Obteniendo conexión de la base de datos...');
+    connection = await pool.getConnection();
+    log('✅ Conexión obtenida', 'SUCCESS');
+
+    // 3️⃣ OBTENER CUENTAS SINCRONIZABLES
+    log('📋 Consultando cuentas sincronizables...');
+    
+    // 🔥 QUERY CRÍTICA: Incluye cuentas hijas que usan token del MCC padre
     const [rows] = await connection.execute(`
       SELECT DISTINCT 
         a.customer_id, 
         a.name,
         a.is_mcc,
-        t.refresh_token, 
-        t.access_token_expiry, 
-        t.token_status, 
-        t.user_id
+        a.parent_account_id,
+        -- Token propio o del MCC padre
+        COALESCE(t.refresh_token, tp.refresh_token) as refresh_token,
+        COALESCE(t.access_token_expiry, tp.access_token_expiry) as access_token_expiry,
+        COALESCE(t.token_status, tp.token_status) as token_status,
+        COALESCE(t.user_id, tp.user_id) as user_id,
+        -- Indicador de origen del token
+        CASE 
+          WHEN t.customer_id IS NOT NULL THEN 'propio'
+          WHEN tp.customer_id IS NOT NULL THEN 'heredado_mcc'
+          ELSE 'sin_token'
+        END as origen_token
       FROM accounts a
+      -- Token propio de la cuenta
       LEFT JOIN tokens t ON a.customer_id = t.customer_id
+      -- Token del MCC padre (si aplica)
+      LEFT JOIN tokens tp ON a.parent_account_id = tp.customer_id
       WHERE a.customer_id IS NOT NULL
         AND a.is_mcc = 0
+        AND (
+          -- Tiene token propio válido
+          (t.token_status = 'valid' AND t.refresh_token IS NOT NULL)
+          OR
+          -- O el MCC padre tiene token válido
+          (tp.token_status = 'valid' AND tp.refresh_token IS NOT NULL)
+        )
+      ORDER BY a.parent_account_id, a.customer_id
     `);
 
     if (rows.length === 0) {
-      console.log('⚠️ No se encontraron cuentas para sincronizar.');
+      log('⚠️ No se encontraron cuentas sincronizables.', 'WARN');
+      
+      // Mostrar estadísticas
+      const [stats] = await connection.execute(`
+        SELECT 
+          COUNT(*) as total_cuentas,
+          SUM(CASE WHEN a.is_mcc = 1 THEN 1 ELSE 0 END) as cuentas_mcc,
+          SUM(CASE WHEN a.is_mcc = 0 THEN 1 ELSE 0 END) as cuentas_normales,
+          COUNT(DISTINCT t.customer_id) as con_token
+        FROM accounts a
+        LEFT JOIN tokens t ON a.customer_id = t.customer_id
+      `);
+      
+      log('', 'INFO');
+      log('📊 Estadísticas:', 'INFO');
+      log(`   Total cuentas: ${stats[0].total_cuentas}`, 'INFO');
+      log(`   Cuentas MCC: ${stats[0].cuentas_mcc}`, 'INFO');
+      log(`   Cuentas normales: ${stats[0].cuentas_normales}`, 'INFO');
+      log(`   Con token: ${stats[0].con_token}`, 'INFO');
+      
       return;
     }
 
-    console.log(`📋 Cuentas encontradas: ${rows.length}`);
+    log(`📊 Cuentas sincronizables encontradas: ${rows.length}`, 'INFO');
+    
+    // Estadísticas por origen de token
+    const propios = rows.filter(r => r.origen_token === 'propio').length;
+    const heredados = rows.filter(r => r.origen_token === 'heredado_mcc').length;
+    
+    log(`   ✅ Con token propio: ${propios}`, 'INFO');
+    log(`   🔑 Con token heredado de MCC: ${heredados}`, 'INFO');
     
     const validAccounts = [];
     const skippedAccounts = [];
+    const tokenRenewalNeeded = new Map(); // customer_id del token -> lista de cuentas
 
-    // 2️⃣ Validar tokens y renovar si es necesario
+    // 4️⃣ AGRUPAR CUENTAS POR TOKEN (para renovar tokens solo una vez)
+    log('🔑 Agrupando cuentas por token...');
     for (const row of rows) {
-      const { customer_id, name, refresh_token, access_token_expiry, token_status, user_id } = row;
-
-      if (!refresh_token || token_status === 'revoked') {
-        console.log(`⛔ ${customer_id} (${name}): Token inválido o revocado`);
-        skippedAccounts.push({ customer_id, reason: 'invalid_token' });
-        continue;
+      const tokenOwnerId = row.origen_token === 'propio' 
+        ? row.customer_id 
+        : row.parent_account_id;
+      
+      if (!tokenRenewalNeeded.has(tokenOwnerId)) {
+        tokenRenewalNeeded.set(tokenOwnerId, {
+          refresh_token: row.refresh_token,
+          access_token_expiry: row.access_token_expiry,
+          user_id: row.user_id,
+          accounts: []
+        });
       }
+      
+      tokenRenewalNeeded.get(tokenOwnerId).accounts.push({
+        customer_id: row.customer_id,
+        name: row.name,
+        origen_token: row.origen_token
+      });
+    }
 
+    log(`📊 Tokens únicos a procesar: ${tokenRenewalNeeded.size}`, 'INFO');
+
+    // 5️⃣ RENOVAR TOKENS SI ES NECESARIO
+    log('🔄 Validando y renovando tokens...');
+    
+    for (const [tokenOwnerId, tokenData] of tokenRenewalNeeded) {
+      const accountsList = tokenData.accounts.map(a => a.customer_id).join(', ');
+      const isMCC = tokenData.accounts[0].origen_token === 'heredado_mcc';
+      
+      log(`\n🔑 Token de ${tokenOwnerId} ${isMCC ? '(MCC padre)' : '(cuenta propia)'}`, 'INFO');
+      log(`   Usado por ${tokenData.accounts.length} cuenta(s): ${accountsList}`, 'INFO');
+      
       try {
-        if (isTokenExpiring(access_token_expiry)) {
-          console.log(`🔄 ${customer_id} (${name}): Renovando token...`);
+        if (isTokenExpiring(tokenData.access_token_expiry)) {
+          log(`   🔄 Token expirando, renovando...`, 'INFO');
 
-          const { access_token, expiry_date } = await renewAccessToken(refresh_token);
+          const { access_token, expiry_date } = await renewAccessToken(tokenData.refresh_token);
 
+          // Actualizar token en BD
           await connection.execute(`
             UPDATE tokens 
             SET access_token = ?, access_token_expiry = ?, token_status = 'valid'
             WHERE customer_id = ? AND user_id = ?
-          `, [access_token, new Date(expiry_date), customer_id, user_id]);
+          `, [access_token, new Date(expiry_date), tokenOwnerId, tokenData.user_id]);
 
-          console.log(`  ✅ Token renovado`);
+          log(`   ✅ Token renovado exitosamente`, 'SUCCESS');
         } else {
-          console.log(`🟢 ${customer_id} (${name}): Token válido`);
+          log(`   ✅ Token válido y vigente`, 'SUCCESS');
         }
 
-        validAccounts.push(customer_id);
+        // Todas las cuentas que usan este token son válidas
+        tokenData.accounts.forEach(acc => validAccounts.push(acc.customer_id));
+
       } catch (err) {
-        console.error(`❌ ${customer_id} (${name}): Falló renovación - ${err.message}`);
+        log(`   ❌ Error renovando token: ${err.message}`, 'ERROR');
         
+        if (err.message.includes('invalid_client')) {
+          log(`   ⚠️  Las credenciales OAuth están incorrectas`, 'ERROR');
+        }
+        
+        // Marcar token como revoked
         await connection.execute(`
           UPDATE tokens SET token_status = 'revoked'
           WHERE customer_id = ? AND user_id = ?
-        `, [customer_id, user_id]);
+        `, [tokenOwnerId, tokenData.user_id]);
         
-        skippedAccounts.push({ customer_id, reason: 'token_renewal_failed' });
+        // Todas las cuentas que usan este token fallan
+        tokenData.accounts.forEach(acc => {
+          skippedAccounts.push({ 
+            customer_id: acc.customer_id, 
+            reason: 'token_renewal_failed',
+            error: err.message 
+          });
+        });
       }
     }
 
-    console.log(`\n📊 Resumen de validación:`);
-    console.log(`  ✅ Cuentas válidas: ${validAccounts.length}`);
-    console.log(`  ⛔ Cuentas omitidas: ${skippedAccounts.length}`);
+    log(`\n📊 Resumen de validación:`);
+    log(`  ✅ Cuentas con token válido: ${validAccounts.length}`);
+    log(`  ⛔ Cuentas omitidas: ${skippedAccounts.length}`);
 
     if (validAccounts.length === 0) {
-      console.log('\n⚠️ No hay cuentas válidas para sincronizar.');
+      log('⚠️ No hay cuentas válidas para sincronizar.', 'WARN');
       return;
     }
 
-    // 3️⃣ Crear TAREAS DIARIAS en la cola para cada cuenta
-    console.log(`\n${'='.repeat(80)}`);
-    console.log('🔥 PROGRAMANDO TAREAS DIARIAS EN LA COLA');
-    console.log('='.repeat(80) + '\n');
+    // 6️⃣ CREAR TAREAS DIARIAS
+    log('='.repeat(80));
+    log('🔥 PROGRAMANDO TAREAS DIARIAS EN LA COLA');
+    log('='.repeat(80));
 
     const results = {
       queued: [],
@@ -141,99 +415,93 @@ async function main() {
 
     for (const customerId of validAccounts) {
       try {
-        const response = await fetch(`${API_BASE}/api/start-daily-sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customerId })
-        });
+        const data = await scheduleTaskForAccount(customerId);
 
-        const data = await response.json();
-
-        if (response.ok) {
-          if (data.taskResult?.created) {
-            console.log(`✅ ${customerId}: Tarea diaria programada (${data.taskResult.date})`);
-            results.queued.push(customerId);
-          } else if (data.taskResult?.reason === 'task_already_exists') {
-            console.log(`ℹ️ ${customerId}: Ya tiene tarea para ${data.taskResult.date}`);
-            results.alreadyQueued.push(customerId);
-          } else if (data.taskResult?.reason === 'is_mcc_account') {
-            console.log(`🚫 ${customerId}: Es cuenta MCC, omitida`);
-          } else {
-            console.log(`⚠️ ${customerId}: ${data.taskResult?.message || 'Sin acción'}`);
-          }
+        if (data.taskResult?.created) {
+          log(`✅ ${customerId}: Tarea diaria programada (${data.taskResult.date})`, 'SUCCESS');
+          results.queued.push(customerId);
+        } else if (data.taskResult?.reason === 'task_already_exists') {
+          log(`ℹ️  ${customerId}: Ya tiene tarea para ${data.taskResult.date}`, 'INFO');
+          results.alreadyQueued.push(customerId);
         } else {
-          console.error(`❌ ${customerId}: Error - ${data.error || response.statusText}`);
-          results.errors.push({ customerId, error: data.error });
+          log(`⚠️  ${customerId}: ${data.taskResult?.message || 'Sin acción'}`, 'WARN');
         }
       } catch (error) {
-        console.error(`❌ ${customerId}: Error al programar - ${error.message}`);
+        log(`❌ ${customerId}: Error al programar - ${error.message}`, 'ERROR');
         results.errors.push({ customerId, error: error.message });
       }
 
-      // Pequeña pausa para no saturar
       await new Promise(resolve => setTimeout(resolve, 200));
     }
 
-    // 4️⃣ Iniciar la cola si hay cuentas programadas
+    // 7️⃣ INICIAR LA COLA
     if (results.queued.length > 0) {
-      console.log(`\n${'='.repeat(80)}`);
-      console.log('🚀 INICIANDO PROCESAMIENTO DE COLA');
-      console.log('='.repeat(80) + '\n');
+      log('='.repeat(80));
+      log('🚀 INICIANDO PROCESAMIENTO DE COLA');
+      log('='.repeat(80));
 
       try {
-        const startResponse = await fetch(`${API_BASE}/api/start-sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        });
-
-        const startData = await startResponse.json();
-
-        if (startResponse.ok) {
-          console.log(`✅ Cola iniciada: ${startData.message}`);
-          console.log(`📊 Estado: ${JSON.stringify(startData.status, null, 2)}`);
-        } else {
-          console.error(`❌ Error iniciando cola: ${startData.error}`);
-        }
+        const startData = await startSyncQueue();
+        log(`✅ Cola iniciada: ${startData.message}`, 'SUCCESS');
       } catch (error) {
-        console.error(`❌ Error al iniciar cola: ${error.message}`);
+        log(`❌ Error al iniciar cola: ${error.message}`, 'ERROR');
       }
     } else {
-      console.log(`\nℹ️ No hay nuevas tareas que procesar (todas las cuentas ya tienen tarea para hoy)`);
+      log('ℹ️  No hay nuevas tareas que procesar', 'INFO');
     }
 
-    // 5️⃣ Resumen final
-    console.log(`\n${'='.repeat(80)}`);
-    console.log('📊 RESUMEN FINAL');
-    console.log('='.repeat(80));
-    console.log(`  ✅ Tareas diarias programadas: ${results.queued.length}`);
-    console.log(`  ℹ️ Ya programadas para hoy: ${results.alreadyQueued.length}`);
-    console.log(`  ❌ Errores: ${results.errors.length}`);
-    console.log('='.repeat(80) + '\n');
+    // 8️⃣ RESUMEN FINAL
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    
+    log('='.repeat(80));
+    log('📊 RESUMEN FINAL');
+    log('='.repeat(80));
+    log(`  ✅ Tareas programadas: ${results.queued.length}`);
+    log(`  ℹ️  Ya en cola: ${results.alreadyQueued.length}`);
+    log(`  ❌ Errores: ${results.errors.length}`);
+    log(`  ⏱️  Duración: ${duration}s`);
+    log('='.repeat(80));
 
     if (results.errors.length > 0) {
-      console.log('❌ Cuentas con errores:');
+      log('❌ Cuentas con errores:', 'ERROR');
       results.errors.forEach(({ customerId, error }) => {
-        console.log(`  • ${customerId}: ${error}`);
+        log(`  • ${customerId}: ${error}`, 'ERROR');
       });
     }
 
-    console.log('🎉 Cron job finalizado.\n');
+    log('🎉 Cron job finalizado exitosamente', 'SUCCESS');
 
   } catch (error) {
-    console.error('❌ Error general en cron job:', error.message);
+    log(`❌ Error crítico: ${error.message}`, 'ERROR');
+    if (error.stack) {
+      log(error.stack, 'ERROR');
+    }
     throw error;
   } finally {
-    // ✅ LIBERAR LA CONEXIÓN AL POOL (NO CERRAR EL POOL)
     if (connection) {
       connection.release();
-      console.log('🔓 Conexión liberada al pool');
+      log('🔓 Conexión liberada al pool', 'INFO');
     }
-    // ❌ NO HACER: await pool.end();
+    
+    try {
+      await pool.end();
+      log('✅ Pool MySQL cerrado correctamente', 'SUCCESS');
+    } catch (error) {
+      log(`⚠️  Error al cerrar pool: ${error.message}`, 'WARN');
+    }
   }
 }
 
-// Ejecutar
-main().catch(error => {
-  console.error('💥 Error fatal:', error);
-  process.exit(1);
-});
+// ========================================
+// EJECUCIÓN
+// ========================================
+
+main()
+  .then(() => {
+    log('✅ Proceso completado exitosamente');
+    process.exit(0);
+  })
+  .catch(error => {
+    log(`💥 Error fatal: ${error.message}`, 'ERROR');
+    process.exit(1);
+  });

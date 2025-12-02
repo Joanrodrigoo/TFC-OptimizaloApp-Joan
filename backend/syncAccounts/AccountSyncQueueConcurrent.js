@@ -8,11 +8,11 @@ class AccountSyncQueueConcurrent {
     this.pool = pool;
     this.maxConcurrent = config.maxConcurrent || 3;
     this.retryDelay = config.retryDelay || 2000;
-    this.apiBase = config.apiBase || 'http://localhost:3000';
+    this.apiBase = config.apiBase || process.env.API_BASE_URL || 'http://localhost:3000';
     this.processingAccounts = new Set();
+    this.abortControllers = new Map();
     this.isRunning = false;
     
-    // Cliente de Google Ads
     this.googleAdsClient = new GoogleAdsApi({
       client_id: config.clientId || process.env.GOOGLE_CLIENT_ID,
       client_secret: config.clientSecret || process.env.GOOGLE_CLIENT_SECRET,
@@ -20,11 +20,9 @@ class AccountSyncQueueConcurrent {
     });
 
     console.log(`🚀 AccountSyncQueueConcurrent inicializado (max: ${this.maxConcurrent} cuentas)`);
+    console.log(`🌐 API Base: ${this.apiBase}`);
   }
 
-  // ========================================
-  // MÉTODO PRINCIPAL: Iniciar procesamiento
-  // ========================================
   async start() {
     if (this.isRunning) {
       console.log("⚠️ El procesador ya está en ejecución");
@@ -38,10 +36,6 @@ class AccountSyncQueueConcurrent {
 
     try {
       await this.processQueue();
-      
-      // 🔥 Después de procesar toda la cola, verificar análisis
-      await this.triggerAnalysisForReadyAccounts();
-      
     } catch (error) {
       console.error("❌ Error crítico en el procesador:", error);
     } finally {
@@ -52,15 +46,17 @@ class AccountSyncQueueConcurrent {
     }
   }
 
-  // ========================================
-  // CICLO PRINCIPAL DE PROCESAMIENTO
-  // ========================================
   async processQueue() {
     while (true) {
-      // 1️⃣ Obtener cuentas pendientes
       const pendingAccounts = await this.getPendingAccounts();
       
       if (pendingAccounts.length === 0) {
+        if (this.processingAccounts.size > 0) {
+          console.log(`⏳ No hay más pendientes, pero ${this.processingAccounts.size} cuentas aún están procesándose...`);
+          await this.sleep(this.retryDelay);
+          continue;
+        }
+        
         console.log("✅ No hay más cuentas pendientes para sincronización");
         break;
       }
@@ -68,375 +64,330 @@ class AccountSyncQueueConcurrent {
       console.log(`📋 Cuentas pendientes: ${pendingAccounts.length}`);
       console.log(`🔄 Procesando actualmente: ${this.processingAccounts.size}/${this.maxConcurrent}`);
 
-      // 2️⃣ Procesar cuentas hasta el límite de concurrencia
       const availableSlots = this.maxConcurrent - this.processingAccounts.size;
-      const accountsToProcess = pendingAccounts.slice(0, availableSlots);
-
-      if (accountsToProcess.length === 0) {
-        // Esperar a que se libere algún slot
+      
+      if (availableSlots <= 0) {
+        console.log(`⏸️  Todos los slots ocupados, esperando...`);
         await this.sleep(this.retryDelay);
         continue;
       }
 
-// 3️⃣ Lanzar procesamiento concurrente con control de timeout
-const promises = accountsToProcess.map(account => {
-  const task = this.processCustomer(account.customer_id);
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`⏰ Timeout global (15 min) para ${account.customer_id}`)), 15 * 60 * 1000)
-  );
-  return Promise.race([task, timeout])
-    .catch(err => console.error(`❌ Error o timeout en ${account.customer_id}:`, err.message))
-    .finally(() => this.processingAccounts.delete(account.customer_id)); // 🔥 Asegura liberar slot
-});
+      const accountsToProcess = pendingAccounts.slice(0, availableSlots);
+      console.log(`🚀 Iniciando procesamiento de ${accountsToProcess.length} cuenta(s)...`);
 
-// Esperar a que termine al menos una
-await Promise.race(promises);
+      accountsToProcess.forEach(account => {
+        const controller = new AbortController();
+        this.abortControllers.set(account.customer_id, controller);
+        
+        this.processCustomerWithTimeout(account.customer_id, controller)
+          .catch(err => {
+            console.error(`❌ Error procesando ${account.customer_id}:`, err.message);
+          });
+      });
 
-      
-      // Pequeña pausa para evitar sobrecarga
-      await this.sleep(500);
+      await this.sleep(2000);
     }
 
-    // Esperar a que terminen las últimas cuentas
     if (this.processingAccounts.size > 0) {
       console.log(`⏳ Esperando a que terminen las últimas ${this.processingAccounts.size} cuentas...`);
-      while (this.processingAccounts.size > 0) {
+      
+      let waitCount = 0;
+      const maxWaitMinutes = 120;
+      const maxWaitIterations = (maxWaitMinutes * 60);
+      
+      while (this.processingAccounts.size > 0 && waitCount < maxWaitIterations) {
         await this.sleep(1000);
+        waitCount++;
+        
+        if (waitCount % 30 === 0) {
+          console.log(`   ⏳ Aún esperando: ${this.processingAccounts.size} cuentas activas - ${Array.from(this.processingAccounts).join(', ')}`);
+        }
+      }
+      
+      if (this.processingAccounts.size > 0) {
+        console.warn(`⚠️ Timeout esperando cuentas después de ${maxWaitMinutes} minutos: ${Array.from(this.processingAccounts).join(', ')}`);
+        
+        for (const customerId of this.processingAccounts) {
+          const controller = this.abortControllers.get(customerId);
+          if (controller) {
+            console.log(`🛑 Abortando ${customerId} por timeout global`);
+            controller.abort();
+          }
+        }
       }
     }
   }
 
-  // ========================================
-  // 🔥 TRIGGER DE ANÁLISIS (COMPLETAMENTE MEJORADO)
-  // ========================================
-  async triggerAnalysisForReadyAccounts() {
+  async processCustomerWithTimeout(customerId, controller) {
+    const timeoutMs = 60 * 60 * 1000; // 1 hora
+    
+    const task = this.processCustomer(customerId, controller.signal);
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => {
+        console.error(`⏰ TIMEOUT (1h) alcanzado para ${customerId}`);
+        controller.abort();
+        reject(new Error(`Timeout para ${customerId}`));
+      }, timeoutMs)
+    );
+    
     try {
-      console.log('\n' + '='.repeat(80));
-      console.log('🔍 VERIFICANDO CUENTAS LISTAS PARA ANÁLISIS');
-      console.log('='.repeat(80) + '\n');
+      await Promise.race([task, timeout]);
+    } catch (error) {
+      console.error(`❌ Error en ${customerId}:`, error.message);
+      throw error;
+    } finally {
+      this.abortControllers.delete(customerId);
+      console.log(`🧹 AbortController limpiado para ${customerId}`);
+    }
+  }
 
-      // Obtener cuentas que:
-      // 1. Completaron TODAS sus tareas de sincronización
-      // 2. Tienen al menos 7 días de datos
-      // 3. NO tienen análisis reciente (últimas 24h)
-      const [readyAccounts] = await this.pool.execute(`
-        SELECT DISTINCT 
-          cmh.customer_id, 
-          a.name,
-          COUNT(DISTINCT cmh.date) as days_count
-        FROM campaign_metrics_history cmh
-        LEFT JOIN accounts a ON a.customer_id = cmh.customer_id
-        WHERE NOT EXISTS (
-          -- No tienen tareas pendientes o en proceso
-          SELECT 1 FROM sync_queue sq 
-          WHERE sq.customer_id = cmh.customer_id 
-          AND sq.status IN ('pending', 'processing')
-        )
-        AND NOT EXISTS (
-          -- NO tienen análisis reciente (últimas 24h)
-          SELECT 1 FROM analysis_queue aq
-          WHERE aq.customer_id = cmh.customer_id
-          AND aq.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-        )
-        GROUP BY cmh.customer_id, a.name
-        HAVING days_count >= 7
-      `);
-
-      if (readyAccounts.length === 0) {
-        console.log('ℹ️  No hay cuentas listas para análisis (o ya fueron analizadas recientemente)');
-        return;
-      }
-
-      console.log(`📊 Cuentas listas para análisis: ${readyAccounts.length}\n`);
-
-      // Programar análisis para cada cuenta
-      let queued = 0;
-      let alreadyQueued = 0;
-      let errors = 0;
-
-      for (const { customer_id, name, days_count } of readyAccounts) {
-        try {
-          console.log(`📋 ${customer_id} (${name || 'Sin nombre'}): ${days_count} días de datos`);
-
-          const response = await fetch(`${this.apiBase}/api/schedule-analysis`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ customerId: customer_id })
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            
-            if (data.taskResult?.created) {
-              console.log(`   ✅ Análisis programado`);
-              queued++;
-            } else if (data.taskResult?.reason === 'task_already_exists') {
-              console.log(`   ℹ️  Ya tiene análisis en cola`);
-              alreadyQueued++;
-            } else {
-              console.log(`   ⚠️  ${data.message || 'Sin acción'}`);
-            }
-          } else {
-            const error = await response.text();
-            console.warn(`   ⚠️  Error HTTP ${response.status}: ${error}`);
-            errors++;
-          }
-        } catch (error) {
-          console.error(`   ❌ Error: ${error.message}`);
-          errors++;
-        }
-
-        // Pausa pequeña entre programaciones
-        await this.sleep(100);
-      }
-
-      console.log('\n' + '─'.repeat(80));
-      console.log(`📊 Resumen de programación:`);
-      console.log(`   ✅ Análisis programados: ${queued}`);
-      console.log(`   ℹ️  Ya en cola: ${alreadyQueued}`);
-      console.log(`   ❌ Errores: ${errors}`);
-      console.log('─'.repeat(80) + '\n');
-
-      // 🔥 CORREGIDO: Verificar si la cola YA está corriendo antes de iniciar
-      if (queued > 0) {
-        console.log(`🚀 Verificando estado de cola de análisis...\n`);
-        
-        try {
-          // Primero verificar el estado
-          const statusResponse = await fetch(`${this.apiBase}/api/analysis-queue-status`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-          });
-
-          if (statusResponse.ok) {
-            const statusData = await statusResponse.json();
-            
-            if (statusData.isRunning) {
-              console.log(`ℹ️  Cola de análisis YA está corriendo (${statusData.processingCount}/${statusData.maxConcurrent} activos)`);
-              console.log(`   Las ${queued} nuevas tareas se procesarán automáticamente`);
-            } else {
-              // Solo iniciar si NO está corriendo
-              console.log(`🚀 Iniciando cola de análisis para ${queued} cuentas...\n`);
-              
-              const response = await fetch(`${this.apiBase}/api/start-analysis`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-              });
-
-              if (response.ok) {
-                const data = await response.json();
-                
-                // 🔥 NUEVO: Manejar correctamente ambos casos
-                if (data.alreadyRunning) {
-                  console.log(`ℹ️  ${data.message}`);
-                  console.log(`   Las ${queued} nuevas tareas se procesarán automáticamente`);
-                } else {
-                  console.log(`✅ ${data.message}`);
-                  if (data.status) {
-                    console.log(`📊 Estado inicial:`);
-                    console.log(`   - Procesando: ${data.status.processingCount}/${data.status.maxConcurrent}`);
-                    console.log(`   - Cuentas: ${data.status.processingAccounts.join(', ') || 'Ninguna aún'}`);
-                  }
-                }
-              } else {
-                const errorText = await response.text();
-                console.error(`❌ Error HTTP ${response.status} al iniciar cola: ${errorText}`);
-              }
-            }
-          } else {
-            console.warn(`⚠️  No se pudo verificar estado de cola de análisis (HTTP ${statusResponse.status})`);
-            // Intentar iniciar de todas formas
-            console.log(`   Intentando iniciar cola de todas formas...`);
-            
-            try {
-              const response = await fetch(`${this.apiBase}/api/start-analysis`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-              });
-
-              if (response.ok) {
-                const data = await response.json();
-                console.log(`✅ ${data.message}`);
-              } else {
-                const errorText = await response.text();
-                console.error(`❌ Error al iniciar: ${errorText}`);
-              }
-            } catch (startError) {
-              console.error(`❌ Error al intentar iniciar: ${startError.message}`);
-            }
-          }
-        } catch (error) {
-          console.error(`❌ Error en verificación/inicio de cola: ${error.message}`);
-          console.error(`   Stack:`, error.stack);
-        }
+  async getPendingAccounts() {
+    try {
+      let query;
+      let params;
+      
+      if (this.processingAccounts.size > 0) {
+        const placeholders = Array.from(this.processingAccounts).map(() => '?').join(',');
+        query = `
+          SELECT DISTINCT customer_id
+          FROM sync_queue
+          WHERE status = 'pending'
+          AND customer_id NOT IN (${placeholders})
+          ORDER BY id
+          LIMIT 10
+        `;
+        params = Array.from(this.processingAccounts);
       } else {
-        console.log('ℹ️  No se programaron nuevos análisis');
+        query = `
+          SELECT DISTINCT customer_id
+          FROM sync_queue
+          WHERE status = 'pending'
+          ORDER BY id
+          LIMIT 10
+        `;
+        params = [];
       }
 
-      console.log('\n' + '='.repeat(80));
-      console.log('✅ VERIFICACIÓN DE ANÁLISIS COMPLETADA');
-      console.log('='.repeat(80) + '\n');
+      const [tasks] = await this.pool.execute(query, params);
+      
+      if (tasks.length > 0) {
+        console.log(`   📥 Obtenidas ${tasks.length} cuentas pendientes: ${tasks.map(t => t.customer_id).join(', ')}`);
+      }
+      
+      return tasks;
 
     } catch (error) {
-      console.error('❌ Error en triggerAnalysisForReadyAccounts:', error);
-      console.error('Stack:', error.stack);
-      // No lanzar error para no romper el flujo
+      console.error("❌ Error obteniendo cuentas pendientes:", error);
+      return [];
     }
   }
 
-  // ========================================
-  // OBTENER CUENTAS PENDIENTES
-  // ========================================
-  async getPendingAccounts() {
-    const [rows] = await this.pool.execute(`
-      SELECT 
-        customer_id,
-        COUNT(*) AS pending_weeks,
-        MIN(week_number) AS next_week,
-        MAX(attempts) AS max_attempts_used
-      FROM sync_queue
-      WHERE status IN ('pending', 'failed') 
-        AND attempts < max_attempts
-      GROUP BY customer_id
-      ORDER BY 
-        MAX(attempts) ASC,
-        MIN(created_at) ASC
-    `);
-    
-    return rows;
-  }
-
-  // ========================================
-  // PROCESAR UNA CUENTA COMPLETA
-  // ========================================
-  async processCustomer(customerId) {
-    // Evitar duplicados
+  async processCustomer(customerId, signal) {
     if (this.processingAccounts.has(customerId)) {
-      console.log(`⚠️ ${customerId} ya está en proceso`);
-      return;
+      console.log(`⚠️ ${customerId} ya está siendo procesado`);
+      return false;
     }
 
     this.processingAccounts.add(customerId);
-    console.log(`\n${"─".repeat(80)}`);
-    console.log(`🏁 INICIANDO CUENTA: ${customerId}`);
-    console.log(`📊 Cuentas activas: ${this.processingAccounts.size}/${this.maxConcurrent}`);
-    console.log("─".repeat(80));
+    console.log(`🔒 ${customerId} agregado a processingAccounts (${this.processingAccounts.size} activas)`);
 
     try {
-      let hasMoreWeeks = true;
-      let weekCount = 0;
+      const [tasks] = await this.pool.execute(`
+        SELECT * FROM sync_queue
+        WHERE customer_id = ? AND status = 'pending'
+        ORDER BY week_number
+      `, [customerId]);
 
-      while (hasMoreWeeks) {
-        hasMoreWeeks = await this.processNextWeek(customerId);
-        if (hasMoreWeeks) {
-          weekCount++;
-          console.log(`  ✅ Semana ${weekCount} completada para ${customerId}`);
+      if (tasks.length === 0) {
+        console.log(`⚠️ No hay tareas pendientes para ${customerId}`);
+        return false;
+      }
+
+      console.log(`\n${"=".repeat(40)}`);
+      console.log(`📊 [${customerId}] - ${tasks.length} SEMANAS PENDIENTES`);
+      console.log(`${"=".repeat(40)}\n`);
+
+      for (const task of tasks) {
+        if (signal?.aborted) {
+          console.log(`🛑 Procesamiento cancelado para ${customerId}`);
+          break;
         }
+
+        await this.processWeek(customerId, task, signal);
       }
 
       console.log(`\n${"✅".repeat(40)}`);
-      console.log(`✅ CUENTA ${customerId} COMPLETADA (${weekCount} semanas)`);
-      console.log("✅".repeat(40) + "\n");
+      console.log(`✅ CUENTA ${customerId} COMPLETADA (${tasks.length} semanas)`);
+      console.log(`${"✅".repeat(40)}\n`);
+
+      // Calcular total de días importados
+      const totalDaysToImport = tasks.reduce((sum, task) => {
+        const startDate = new Date(task.start_date);
+        const endDate = new Date(task.end_date);
+        const days = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+        return sum + days;
+      }, 0);
+
+      console.log(`📊 Total de días a importar: ${totalDaysToImport}`);
+
+      // Programar análisis solo si la importación es significativa
+      if (totalDaysToImport >= 14) {
+        console.log(`✅ Importación significativa (≥14 días) - programando análisis`);
+        
+        // Verificar si ya tiene análisis reciente
+        const [recentAnalysis] = await this.pool.execute(`
+          SELECT id FROM analysis_queue
+          WHERE customer_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
+        `, [customerId]);
+
+        if (recentAnalysis.length === 0) {
+          try {
+            const response = await fetch(`${this.apiBase}/api/schedule-analysis`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ customerId })
+            });
+
+            if (response.ok) {
+              console.log(`🤖 Análisis programado`);
+            } else {
+              console.warn(`⚠️  No se pudo programar análisis: ${response.status}`);
+            }
+          } catch (error) {
+            console.error(`❌ Error programando análisis:`, error.message);
+          }
+        } else {
+          console.log(`ℹ️  Ya tiene análisis reciente programado`);
+        }
+      } else {
+        console.log(`ℹ️  Importación pequeña (${totalDaysToImport} días) - sin análisis`);
+      }
+
+      return true;
 
     } catch (error) {
-      console.error(`\n${"❌".repeat(40)}`);
-      console.error(`❌ ERROR EN CUENTA ${customerId}: ${error.message}`);
-      console.error("❌".repeat(40) + "\n");
+      console.error(`❌ Error procesando cuenta ${customerId}:`, error);
+      throw error;
     } finally {
       this.processingAccounts.delete(customerId);
+      console.log(`🔓 ${customerId} liberado de processingAccounts (${this.processingAccounts.size} activas)`);
     }
   }
 
-  // ========================================
-  // PROCESAR LA SIGUIENTE SEMANA DE UNA CUENTA
-  // ========================================
-  async processNextWeek(customerId) {
-    const conn = await this.pool.getConnection();
+  async processWeek(customerId, task, signal) {
+    const weekStartTime = Date.now();
     
     try {
-      // 1️⃣ Obtener la siguiente tarea pendiente
-      const [tasks] = await conn.execute(`
-        SELECT * FROM sync_queue
-        WHERE customer_id = ? 
-          AND status IN ('pending', 'failed') 
-          AND attempts < max_attempts
-        ORDER BY week_number ASC
-        LIMIT 1
-      `, [customerId]);
+      console.log(`\n┌${"─".repeat(78)}┐`);
+      console.log(`│ 📅 [${customerId}] PROCESANDO SEMANA ${task.week_number} │`);
+      console.log(`│    Período: ${task.start_date} → ${task.end_date}`.padEnd(79) + '│');
+      console.log(`└${"─".repeat(78)}┘\n`);
 
-      if (!tasks.length) {
-        return false; // No hay más semanas
-      }
-
-      const task = tasks[0];
-      console.log(`  📅 Procesando ${customerId} - Semana ${task.week_number} (${task.start_date} → ${task.end_date})`);
-
-      // 2️⃣ Marcar como 'processing'
-      await conn.execute(`
+      await this.pool.execute(`
         UPDATE sync_queue
         SET status = 'processing', 
             started_at = NOW(), 
-            attempts = attempts + 1
+            attempts = attempts + 1,
+            error_message = NULL
         WHERE id = ?
       `, [task.id]);
 
-      conn.release();
-
-      // 3️⃣ Obtener token y configuración
-const { customer, finalCustomerId } = await this.getCustomerClient(customerId);
-
-// 🔥 VALIDACIÓN CRÍTICA DE SEGURIDAD
-if (finalCustomerId !== customerId) {
-  throw new Error(
-    `❌ CRITICAL MISMATCH: Solicitada ${customerId} pero se obtuvo ${finalCustomerId}. Abortando por seguridad.`
-  );
-}
-
-console.log(`   ✅ Validación OK - Procesando cuenta: ${customerId}`);
-
-      // 4️⃣ Procesar cada día de la semana (de más reciente a más antiguo)
+      const { customer, finalCustomerId } = await this.getCustomerClient(customerId);
+      
       const startDate = new Date(task.start_date);
       const endDate = new Date(task.end_date);
-      const currentDate = new Date(endDate);
+      let currentDate = new Date(endDate);
       
+      const totalDays = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
       let daysProcessed = 0;
-      const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+      const dayDurations = [];
+
+      console.log(`📊 Total de días a procesar: ${totalDays}`);
+      console.log(`⏰ Inicio: ${new Date().toLocaleTimeString()}\n`);
 
       while (currentDate >= startDate) {
+        if (signal?.aborted) {
+          console.error(`\n🛑 Procesamiento cancelado para ${customerId}`);
+          
+          if (dayDurations.length > 0) {
+            const avgDuration = dayDurations.reduce((a,b) => a+b, 0) / dayDurations.length;
+            console.error(`   📊 Duración promedio por día: ${(avgDuration / 1000).toFixed(1)}s`);
+            console.error(`   📊 Día más lento: ${(Math.max(...dayDurations) / 1000).toFixed(1)}s`);
+            console.error(`   📊 Día más rápido: ${(Math.min(...dayDurations) / 1000).toFixed(1)}s`);
+          }
+          
+          throw new Error('Procesamiento cancelado por timeout');
+        }
+
         const dateStr = currentDate.toISOString().split("T")[0];
+        const dayStart = Date.now();
         
         try {
-          // Aquí llamamos a tu función existente processSingleDay
           await global.processSingleDay(customer, finalCustomerId, dateStr, task.end_date);
+          
+          const dayDuration = Date.now() - dayStart;
+          dayDurations.push(dayDuration);
           daysProcessed++;
           
           const progress = Math.round((daysProcessed / totalDays) * 100);
-          console.log(`    ✓ ${dateStr} (${daysProcessed}/${totalDays} días - ${progress}%)`);
+          const avgDuration = dayDurations.reduce((a,b) => a+b, 0) / dayDurations.length;
+          const estimatedRemaining = ((totalDays - daysProcessed) * avgDuration) / 1000 / 60;
+          const elapsedTotal = (Date.now() - weekStartTime) / 1000 / 60;
+          
+          console.log(`    ✓ ${dateStr} (${daysProcessed}/${totalDays} - ${progress}%) - ${(dayDuration/1000).toFixed(1)}s - Total: ${elapsedTotal.toFixed(1)}min - ETA: ${estimatedRemaining.toFixed(1)}min`);
+
+          if (daysProcessed % 3 === 0) {
+            const elapsedTime = Date.now() - weekStartTime;
+            console.log(`\n    💾 ========== CHECKPOINT ${daysProcessed}/${totalDays} días ==========`);
+            console.log(`       ⏱️  Tiempo transcurrido: ${(elapsedTime / 1000 / 60).toFixed(1)} min`);
+            console.log(`       📊 Promedio por día: ${(avgDuration / 1000).toFixed(1)}s`);
+            console.log(`       📊 Día más lento: ${(Math.max(...dayDurations) / 1000).toFixed(1)}s`);
+            console.log(`       📊 ETA restante: ${estimatedRemaining.toFixed(1)} min`);
+            console.log(`    =============================================\n`);
+            
+            await this.sleep(1000);
+          }
         } catch (dayError) {
-          console.error(`    ✗ Error en ${dateStr}:`, dayError.message);
-          // Continuar con el siguiente día
+          const dayDuration = Date.now() - dayStart;
+          console.error(`    ✗ Error en ${dateStr} después de ${(dayDuration/1000).toFixed(1)}s:`, dayError.message);
+          
+          if (dayError.message.includes('RATE_LIMIT_EXCEEDED') || 
+              dayError.message.includes('Query timeout')) {
+            console.warn(`    ⚠️  Error recuperable, continuando con siguiente día...`);
+          } else {
+            throw dayError;
+          }
         }
         
         currentDate.setDate(currentDate.getDate() - 1);
       }
 
-      // 5️⃣ Marcar como completada
       await this.pool.execute(`
         UPDATE sync_queue
         SET status = 'completed', completed_at = NOW()
         WHERE id = ?
       `, [task.id]);
 
-      console.log(`  ✅ Semana ${task.week_number} completada (${daysProcessed}/${totalDays} días)`);
-      return true; // Hay más semanas por procesar
+      const weekDuration = Date.now() - weekStartTime;
+      console.log(`\n✅ [${customerId}] ✅ SEMANA ${task.week_number} COMPLETADA`);
+      console.log(`   ⏱️  Tiempo total: ${(weekDuration / 1000 / 60).toFixed(1)} min`);
+      console.log(`   📊 Días procesados: ${daysProcessed}/${totalDays}`);
+      
+      if (dayDurations.length > 0) {
+        const avgDuration = dayDurations.reduce((a,b) => a+b, 0) / dayDurations.length;
+        console.log(`   📊 Promedio por día: ${(avgDuration / 1000).toFixed(1)}s`);
+        console.log(`   📊 Día más lento: ${(Math.max(...dayDurations) / 1000).toFixed(1)}s`);
+        console.log(`   📊 Día más rápido: ${(Math.min(...dayDurations) / 1000).toFixed(1)}s\n`);
+      }
+
+      return true;
 
     } catch (error) {
-      // 6️⃣ Manejar error
-      console.error(`  ❌ Error en semana: ${error.message}`);
+      const weekDuration = Date.now() - weekStartTime;
+      console.error(`\n❌ [${customerId}] Error en semana después de ${(weekDuration / 1000 / 60).toFixed(1)} min:`, error.message);
       
-      const conn2 = await this.pool.getConnection();
       try {
-        const [task] = await conn2.execute(`
+        const [task] = await this.pool.execute(`
           SELECT * FROM sync_queue 
           WHERE customer_id = ? AND status = 'processing'
           ORDER BY id DESC LIMIT 1
@@ -444,141 +395,122 @@ console.log(`   ✅ Validación OK - Procesando cuenta: ${customerId}`);
 
         if (task.length > 0) {
           const status = task[0].attempts >= task[0].max_attempts ? 'failed' : 'pending';
-          await conn2.execute(`
+          const errorMsg = error.message.substring(0, 500);
+          
+          await this.pool.execute(`
             UPDATE sync_queue
             SET status = ?, error_message = ?
             WHERE id = ?
-          `, [status, error.message.substring(0, 500), task[0].id]);
+          `, [status, errorMsg, task[0].id]);
+          
+          console.log(`   📝 Estado actualizado a '${status}' (intento ${task[0].attempts}/${task[0].max_attempts})`);
         }
-      } finally {
-        conn2.release();
+      } catch (updateError) {
+        console.error(`❌ Error actualizando estado:`, updateError.message);
       }
 
       throw error;
-    } finally {
-      if (conn) {
-        try { conn.release(); } catch {}
-      }
     }
   }
 
-  // ========================================
-  // OBTENER CLIENTE DE GOOGLE ADS
-  // ========================================
   async getCustomerClient(customerId) {
-  const conn = await this.pool.getConnection();
-  
-  try {
-    console.log(`\n🔑 [getCustomerClient] Buscando credenciales para: ${customerId}`);
-    
-    // 🔥 PASO 1: Verificar si la cuenta existe y obtener su parent
-    const [accountInfo] = await conn.execute(`
-      SELECT customer_id, name, is_mcc, parent_account_id
-      FROM accounts
-      WHERE customer_id = ?
-      LIMIT 1
-    `, [customerId]);
-    
-    if (!accountInfo.length) {
-      throw new Error(`Cuenta ${customerId} no existe en la base de datos`);
-    }
-    
-    const account = accountInfo[0];
-    console.log(`   📋 Cuenta encontrada: ${account.name}`);
-    console.log(`   ℹ️  Es MCC: ${account.is_mcc === 1 ? 'Sí' : 'No'}`);
-    console.log(`   ℹ️  Parent MCC: ${account.parent_account_id || 'Ninguno'}`);
-    
-    // 🔥 PASO 2: Buscar el token (de la cuenta misma o de su MCC padre)
-    let tokenRow;
-    
-    if (account.parent_account_id) {
-      // Si tiene parent, usar el token del MCC padre
-      console.log(`   🏢 Buscando token del MCC padre: ${account.parent_account_id}`);
+    try {
+      console.log(`\n🔑 [getCustomerClient] Buscando credenciales para: ${customerId}`);
       
-      [tokenRow] = await conn.execute(`
-        SELECT refresh_token, customer_id as token_owner, is_mcc
-        FROM tokens
-        WHERE customer_id = ?
-        LIMIT 1
-      `, [account.parent_account_id]);
-      
-    } else {
-      // Si no tiene parent, usar su propio token
-      console.log(`   👤 Buscando token propio de la cuenta`);
-      
-      [tokenRow] = await conn.execute(`
-        SELECT refresh_token, customer_id as token_owner, is_mcc
-        FROM tokens
+      const [accountInfo] = await this.pool.execute(`
+        SELECT customer_id, name, is_mcc, parent_account_id
+        FROM accounts
         WHERE customer_id = ?
         LIMIT 1
       `, [customerId]);
-    }
-    
-    if (!tokenRow.length) {
-      const searchedId = account.parent_account_id || customerId;
-      throw new Error(`No se encontró token para ${searchedId}`);
-    }
-    
-    const { refresh_token, token_owner, is_mcc } = tokenRow[0];
-    const tokenIsMcc = is_mcc === 1;
-    
-    console.log(`   ✅ Token encontrado: ${token_owner}`);
-    console.log(`   ℹ️  Token es de MCC: ${tokenIsMcc ? 'Sí' : 'No'}`);
-    
-    // 🔥 PASO 3: Validación de seguridad
-    if (account.is_mcc === 1) {
-      throw new Error(`No se puede sincronizar ${customerId} porque es una cuenta MCC`);
-    }
-    
-    // 🔥 PASO 4: Configurar cliente de Google Ads
-    const clientConfig = {
-      customer_id: customerId, // ⚠️ SIEMPRE usar el customerId solicitado
-      refresh_token,
-    };
-    
-    // Solo añadir login_customer_id si el token es de un MCC
-    if (tokenIsMcc) {
-      clientConfig.login_customer_id = token_owner;
-      console.log(`   🏢 Usando login_customer_id: ${token_owner}`);
-    }
-    
-    console.log(`   🎯 Customer ID final: ${customerId}`);
-    console.log(`   ✅ Configuración lista\n`);
-    
-    const customer = this.googleAdsClient.Customer(clientConfig);
+      
+      if (!accountInfo.length) {
+        throw new Error(`Cuenta ${customerId} no existe en la base de datos`);
+      }
+      
+      const account = accountInfo[0];
+      console.log(`   📋 Cuenta encontrada: ${account.name}`);
+      console.log(`   ℹ️  Es MCC: ${account.is_mcc === 1 ? 'Sí' : 'No'}`);
+      console.log(`   ℹ️  Parent MCC: ${account.parent_account_id || 'Ninguno'}`);
+      
+      let tokenRow;
+      const searchId = account.parent_account_id || customerId;
+      
+      if (account.parent_account_id) {
+        console.log(`   🏢 Buscando token del MCC padre: ${account.parent_account_id}`);
+      } else {
+        console.log(`   👤 Buscando token propio de la cuenta`);
+      }
+      
+      [tokenRow] = await this.pool.execute(`
+        SELECT refresh_token, customer_id as token_owner, is_mcc
+        FROM tokens
+        WHERE customer_id = ?
+        LIMIT 1
+      `, [searchId]);
+      
+      if (!tokenRow.length) {
+        throw new Error(`No se encontró token para ${searchId}`);
+      }
+      
+      const { refresh_token, token_owner, is_mcc } = tokenRow[0];
+      const tokenIsMcc = is_mcc === 1;
+      
+      console.log(`   ✅ Token encontrado: ${token_owner}`);
+      console.log(`   ℹ️  Token es de MCC: ${tokenIsMcc ? 'Sí' : 'No'}`);
+      
+      if (account.is_mcc === 1) {
+        throw new Error(`No se puede sincronizar ${customerId} porque es una cuenta MCC`);
+      }
+      
+      const clientConfig = {
+        customer_id: customerId,
+        refresh_token,
+      };
+      
+      if (tokenIsMcc) {
+        clientConfig.login_customer_id = token_owner;
+        console.log(`   🏢 Usando login_customer_id: ${token_owner}`);
+      }
+      
+      console.log(`   🎯 Customer ID final: ${customerId}`);
+      console.log(`   ✅ Configuración lista\n`);
+      
+      const customer = this.googleAdsClient.Customer(clientConfig);
 
-    return { 
-      customer, 
-      finalCustomerId: customerId // ⚠️ SIEMPRE devolver el customerId solicitado
-    };
-    
-  } finally {
-    conn.release();
+      return { 
+        customer, 
+        finalCustomerId: customerId
+      };
+      
+    } catch (error) {
+      console.error(`❌ Error obteniendo cliente:`, error.message);
+      throw error;
+    }
   }
 
-  }
-
-  // ========================================
-  // UTILIDADES
-  // ========================================
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // Obtener estado actual
   getStatus() {
     return {
       isRunning: this.isRunning,
       processingCount: this.processingAccounts.size,
       maxConcurrent: this.maxConcurrent,
-      processingAccounts: Array.from(this.processingAccounts)
+      processingAccounts: Array.from(this.processingAccounts),
+      abortControllersActive: this.abortControllers.size
     };
   }
 
-  // Detener procesamiento
   stop() {
     console.log("🛑 Deteniendo procesador...");
     this.isRunning = false;
+    
+    for (const [customerId, controller] of this.abortControllers.entries()) {
+      console.log(`🛑 Cancelando ${customerId}...`);
+      controller.abort();
+    }
   }
 }
 
