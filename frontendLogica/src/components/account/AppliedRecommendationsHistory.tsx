@@ -1,21 +1,32 @@
 import React, { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-  CheckCircle,
-  AlertCircle,
-  X,
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { 
+  CheckCircle, 
+  AlertCircle, 
   Calendar,
-  TrendingUp,
-  TrendingDown,
-  Target,
-  ArrowRight,
+  Megaphone, 
+  Users, 
+  Layers, 
+  FileText, 
+  Image, 
+  Key, 
+  PieChart, 
+  Search,
+  Loader2
 } from "lucide-react";
 import { fetchAppliedRecommendations } from "@/services/api";
-import PaginationControlled from "@/components/ui/PaginationControlled"; // ajusta ruta si hace falta
 import { Recomendacion } from "@/types";
 
 type Priority = "high" | "medium" | "low";
 type EntityType = "campaign" | "adgroup" | "ad";
+type FunctionalGroup = "campaigns" | "adgroups" | "assetGroups" | "ads" | "assets" | "keywords" | "segments" | "searchTerms";
 
 interface AppliedRecommendation {
   id: string;
@@ -24,6 +35,7 @@ interface AppliedRecommendation {
   priority: Priority;
   impact: string;
   entityType: EntityType;
+  functionalGroup: FunctionalGroup;
   entityName: string;
   appliedDate: string;
   result: {
@@ -40,90 +52,105 @@ interface AppliedRecommendation {
   };
 }
 
-interface Props {
+interface AppliedRecommendationsHistoryProps {
   customerId: number;
 }
 
-const AppliedRecommendationsHistory: React.FC<Props> = ({ customerId }) => {
+const AppliedRecommendationsHistory = ({ customerId }: AppliedRecommendationsHistoryProps) => {
   const [recommendations, setRecommendations] = useState<AppliedRecommendation[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 8;
+  const [groupPages, setGroupPages] = useState<Record<FunctionalGroup, number>>({
+    campaigns: 1,
+    adgroups: 1,
+    assetGroups: 1,
+    ads: 1,
+    assets: 1,
+    keywords: 1,
+    segments: 1,
+    searchTerms: 1
+  });
+
+  // Mapear tipo de objeto a grupo funcional
+  const mapEntityTypeToFunctionalGroup = (entityType: string): FunctionalGroup => {
+    const mapping: Record<string, FunctionalGroup> = {
+      'campaign': 'campaigns',
+      'ad_group': 'adgroups',
+      'asset_group': 'assetGroups',
+      'ad': 'ads',
+      'asset': 'assets',
+      'keyword': 'keywords',
+      'segment': 'segments',
+      'search_term': 'searchTerms'
+    };
+    return mapping[entityType] || 'campaigns';
+  };
+
+  // Mapear prioridad de API a formato del componente
+  const mapPriority = (priority: string): Priority => {
+    const mapping: Record<string, Priority> = {
+      'alta': 'high',
+      'media': 'medium',
+      'baja': 'low'
+    };
+    return mapping[priority] || 'medium';
+  };
+
+  // Mapear tipo de entidad de API a formato del componente
+  const mapEntityType = (entityType: string): EntityType => {
+    const mapping: Record<string, EntityType> = {
+      'campaign': 'campaign',
+      'ad_group': 'adgroup',
+      'ad': 'ad'
+    };
+    return mapping[entityType] || 'campaign';
+  };
 
   useEffect(() => {
     const loadRecommendations = async () => {
       try {
         setLoading(true);
+        setError(null);
         const data = await fetchAppliedRecommendations(customerId);
-        const mapped = data.map((rec: Recomendacion) => ({
+        
+        const mapped: AppliedRecommendation[] = data.map((rec: Recomendacion) => ({
           id: rec.id.toString(),
           title: rec.titulo,
           description: rec.descripcion,
-          priority: rec.prioridad as "high" | "medium" | "low",
+          priority: mapPriority(rec.prioridad),
           impact: rec.impacto_estimado,
-          entityType: rec.tipo_objeto as "campaign" | "adgroup" | "ad",
+          entityType: mapEntityType(rec.tipo_objeto),
+          functionalGroup: mapEntityTypeToFunctionalGroup(rec.tipo_objeto),
           entityName: rec.nombre_objeto || "Entidad",
           appliedDate: rec.fecha_aplicacion || rec.fecha_creacion,
           result: {
-            status: rec.resultado?.estado || "no_change",
-            actualImprovement: rec.resultado?.mejora_real || "-",
-            comparisonPeriod: rec.resultado?.periodo_comparacion || "-",
+            status: (rec.resultado?.estado as "improved" | "no_change" | "worsened") || "no_change",
+            actualImprovement: rec.resultado?.mejora_real || rec.impacto_estimado || "-",
+            comparisonPeriod: rec.resultado?.periodo_comparacion || "7 días",
             kpiVariation: rec.resultado?.variacion_kpi ?? 0,
           },
           details: {
-            justification: rec.detalle?.justificacion || "-",
-            targetKPI: rec.detalle?.kpi_objetivo || "-",
+            justification: rec.detalle?.justificacion || rec.descripcion || "-",
+            targetKPI: rec.detalle?.kpi_objetivo || "KPI",
             currentValue: rec.detalle?.valor_actual || "-",
             expectedValue: rec.detalle?.valor_esperado || "-",
           },
         }));
 
         setRecommendations(mapped);
-        setError(null);
-        setCurrentPage(1); // reset pagina al cargar nuevas recomendaciones
-      } catch (error) {
-        setError(error.message || "Error desconocido");
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Error desconocido";
+        setError(errorMessage);
+        console.error("Error loading applied recommendations:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    loadRecommendations();
+    if (customerId) {
+      loadRecommendations();
+    }
   }, [customerId]);
-
-  const getStatusIcon = (status: "improved" | "no_change" | "worsened") => {
-    switch (status) {
-      case "improved":
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case "no_change":
-        return <AlertCircle className="h-4 w-4 text-yellow-500" />;
-      case "worsened":
-        return <X className="h-4 w-4 text-red-500" />;
-    }
-  };
-
-  const getStatusText = (status: "improved" | "no_change" | "worsened") => {
-    switch (status) {
-      case "improved":
-        return "Mejoró";
-      case "no_change":
-        return "Sin cambio";
-      case "worsened":
-        return "Empeoró";
-    }
-  };
-
-  const getStatusColor = (status: "improved" | "no_change" | "worsened") => {
-    switch (status) {
-      case "improved":
-        return "bg-green-50 text-green-700 border-green-200";
-      case "no_change":
-        return "bg-yellow-50 text-yellow-700 border-yellow-200";
-      case "worsened":
-        return "bg-red-50 text-red-700 border-red-200";
-    }
-  };
 
   const getEntityTypeLabel = (type: EntityType) => {
     switch (type) {
@@ -137,23 +164,58 @@ const AppliedRecommendationsHistory: React.FC<Props> = ({ customerId }) => {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
+    return new Date(dateString).toLocaleDateString('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
     });
   };
 
-  const totalPages = Math.ceil(recommendations.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const currentItems = recommendations.slice(startIndex, startIndex + itemsPerPage);
+  const getFunctionalGroupLabel = (group: FunctionalGroup) => {
+    const labels: Record<FunctionalGroup, string> = {
+      campaigns: "Campañas",
+      adgroups: "Grupos de anuncios",
+      assetGroups: "Grupos de recursos",
+      ads: "Anuncios",
+      assets: "Recursos",
+      keywords: "Keywords",
+      segments: "Segmentos",
+      searchTerms: "Términos de búsqueda"
+    };
+    return labels[group];
+  };
+
+  const getFunctionalGroupIcon = (group: FunctionalGroup) => {
+    const icons: Record<FunctionalGroup, React.ReactNode> = {
+      campaigns: <Megaphone className="h-5 w-5" />,
+      adgroups: <Users className="h-5 w-5" />,
+      assetGroups: <Layers className="h-5 w-5" />,
+      ads: <FileText className="h-5 w-5" />,
+      assets: <Image className="h-5 w-5" />,
+      keywords: <Key className="h-5 w-5" />,
+      segments: <PieChart className="h-5 w-5" />,
+      searchTerms: <Search className="h-5 w-5" />
+    };
+    return icons[group];
+  };
 
   if (loading) {
-    return <p className="text-center py-10 text-muted-foreground">Cargando recomendaciones aplicadas...</p>;
+    return (
+      <div className="text-center py-12">
+        <Loader2 className="h-16 w-16 mx-auto mb-4 text-primary animate-spin" />
+        <p className="text-muted-foreground font-medium">Cargando historial...</p>
+      </div>
+    );
   }
 
   if (error) {
-    return <p className="text-center text-red-500 py-10">Error: {error}</p>;
+    return (
+      <div className="text-center py-12">
+        <AlertCircle className="h-16 w-16 mx-auto mb-4 text-red-400" />
+        <p className="text-red-600 font-medium mb-2">Error al cargar historial</p>
+        <p className="text-muted-foreground text-sm">{error}</p>
+      </div>
+    );
   }
 
   if (recommendations.length === 0) {
@@ -168,100 +230,128 @@ const AppliedRecommendationsHistory: React.FC<Props> = ({ customerId }) => {
     );
   }
 
+  // Agrupar por grupo funcional
+  const groupedRecommendations = recommendations.reduce((acc, rec) => {
+    if (!acc[rec.functionalGroup]) {
+      acc[rec.functionalGroup] = [];
+    }
+    acc[rec.functionalGroup].push(rec);
+    return acc;
+  }, {} as Record<FunctionalGroup, AppliedRecommendation[]>);
+
+  const renderRecommendationCard = (rec: AppliedRecommendation) => (
+    <div key={rec.id} className="bg-card border rounded-lg p-4 hover:shadow-sm transition-all duration-200">
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <h4 className="font-medium text-foreground text-base mb-2">{rec.title}</h4>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Calendar className="h-3 w-3" />
+            <span>Aplicada el {formatDate(rec.appliedDate)}</span>
+            <span className="text-gray-300">•</span>
+            <span>Entidad: {rec.entityName}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderFunctionalGroupBlock = (
+    group: FunctionalGroup,
+    recs: AppliedRecommendation[]
+  ) => {
+    if (recs.length === 0) return null;
+    
+    const itemsPerGroupPage = 5;
+    const currentPage = groupPages[group];
+    const totalPages = Math.ceil(recs.length / itemsPerGroupPage);
+    const startIndex = (currentPage - 1) * itemsPerGroupPage;
+    const visibleRecs = recs.slice(startIndex, startIndex + itemsPerGroupPage);
+
+    return (
+      <AccordionItem key={group} value={group} className="border rounded-lg">
+        <AccordionTrigger className="px-4 py-3 hover:no-underline">
+          <div className="flex items-center justify-between w-full pr-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary/10 text-primary">
+                {getFunctionalGroupIcon(group)}
+              </div>
+              <div className="text-left">
+                <h3 className="font-semibold text-base">{getFunctionalGroupLabel(group)}</h3>
+                <p className="text-xs text-muted-foreground">
+                  {recs.length} recomendación{recs.length !== 1 ? 'es' : ''} aplicada{recs.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+            </div>
+            <Badge className="bg-primary/10 text-primary hover:bg-primary/10 mr-2">
+              {recs.length}
+            </Badge>
+          </div>
+        </AccordionTrigger>
+        <AccordionContent className="px-4 pb-4">
+          <div className="space-y-3">
+            {visibleRecs.map(renderRecommendationCard)}
+            
+            {totalPages > 1 && (
+              <div className="flex justify-center items-center gap-2 mt-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setGroupPages({
+                    ...groupPages,
+                    [group]: Math.max(1, currentPage - 1)
+                  })}
+                  disabled={currentPage === 1}
+                  className="h-8 px-3"
+                >
+                  Anterior
+                </Button>
+                
+                <div className="flex gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                    <Button
+                      key={page}
+                      variant={page === currentPage ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setGroupPages({
+                        ...groupPages,
+                        [group]: page
+                      })}
+                      className="h-8 w-8 p-0"
+                    >
+                      {page}
+                    </Button>
+                  ))}
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setGroupPages({
+                    ...groupPages,
+                    [group]: Math.min(totalPages, currentPage + 1)
+                  })}
+                  disabled={currentPage === totalPages}
+                  className="h-8 px-3"
+                >
+                  Siguiente
+                </Button>
+              </div>
+            )}
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+    );
+  };
+
+  const functionalGroupOrder: FunctionalGroup[] = ['campaigns', 'adgroups', 'ads', 'keywords', 'searchTerms', 'segments', 'assetGroups', 'assets'];
+
   return (
     <div className="space-y-4">
-      <div className="space-y-2">
-        {currentItems.map((rec) => (
-          <div
-            key={rec.id}
-            className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-all duration-200"
-          >
-            {/* Header con título y badges */}
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <h4 className="font-medium text-gray-900 text-base">{rec.title}</h4>
-                  <Badge variant="outline" className="text-xs">
-                    {getEntityTypeLabel(rec.entityType)}
-                  </Badge>
-                  <div className="flex items-center gap-1">
-                    {getStatusIcon(rec.result.status)}
-                    <Badge variant="outline" className={`text-xs ${getStatusColor(rec.result.status)}`}>
-                      {getStatusText(rec.result.status)}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-500 mb-3">
-                  <Calendar className="h-3 w-3" />
-                  <span>Aplicada el {formatDate(rec.appliedDate)}</span>
-                  <span className="text-gray-300">•</span>
-                  <span>Entidad: {rec.entityName}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Métricas */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              <div className="flex items-center justify-between bg-blue-50 rounded-md px-3 py-2 border border-blue-100">
-                <div className="flex items-center gap-2">
-                  <Target className="h-4 w-4 text-blue-600" />
-                  <div>
-                    <div className="font-medium text-blue-900 text-sm">{rec.details.targetKPI}</div>
-                    <div className="text-xs text-blue-700 flex items-center gap-1">
-                      {rec.details.currentValue}
-                      <ArrowRight className="h-3 w-3" />
-                      {rec.details.expectedValue}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                className={`flex items-center justify-between rounded-md px-3 py-2 border ${
-                  rec.result.kpiVariation > 0
-                    ? "bg-green-50 border-green-100"
-                    : "bg-red-50 border-red-100"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  {rec.result.kpiVariation > 0 ? (
-                    <TrendingUp className="h-4 w-4 text-green-600" />
-                  ) : (
-                    <TrendingDown className="h-4 w-4 text-red-600" />
-                  )}
-                  <div>
-                    <div
-                      className={`font-semibold text-sm ${
-                        rec.result.kpiVariation > 0 ? "text-green-900" : "text-red-900"
-                      }`}
-                    >
-                      {rec.result.kpiVariation > 0 ? "+" : ""}
-                      {rec.result.kpiVariation}%
-                    </div>
-                    <div className={`text-xs ${rec.result.kpiVariation > 0 ? "text-green-700" : "text-red-700"}`}>
-                      en {rec.result.comparisonPeriod}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between bg-gray-50 rounded-md px-3 py-2 border border-gray-100">
-                <div>
-                  <div className="text-xs text-gray-600">Justificación</div>
-                  <div className="text-sm font-medium text-gray-900">{rec.details.justification}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Paginación */}
-      <PaginationControlled
-        currentPage={currentPage}
-        onPageChange={setCurrentPage}
-        totalPages={totalPages}
-      />
+      <Accordion type="multiple" defaultValue={[]} className="space-y-3">
+        {functionalGroupOrder.map(group => 
+          renderFunctionalGroupBlock(group, groupedRecommendations[group] || [])
+        )}
+      </Accordion>
     </div>
   );
 };

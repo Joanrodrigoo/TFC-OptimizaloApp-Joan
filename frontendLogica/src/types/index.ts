@@ -31,32 +31,41 @@ export interface GoogleAdsAccount {
   parentAccountId?: string; // ID de la cuenta MCC padre si es una subcuenta
 }
 
-export interface Keyword {
-  // Identificadores
-  keywordId: string;           // siempre presente y clave principal
+export interface Keyword extends Record<string, unknown> {
+  keywordId: string;
   keywordText: string;
   customerId: string;
   campaignId: string;
-  campaignName?: string;
+  campaignName: string;
   adGroupId: string;
-  adGroupName?: string;
-
-  // Configuración
-  matchType: string | number;
-  isNegative?: boolean;
+  adGroupName: string;
+  matchType: number;  // ✅ Debe ser number
   status: string;
-
+  isNegative?: boolean;
+  
   // Métricas básicas
   impressions: number;
   clicks: number;
-  ctr: number;                     // calculado en SQL
-  averageCpcEuros?: number | null; // convertido a euros en backend
-  averageCpcMicros?: number;       // crudo en micros
-  costEuros?: number | null;       // convertido a euros en backend
-  costMicros?: number;             // crudo en micros
+  costMicros: number;
+  costEuros: number;
   conversions: number;
-  qualityScore?: number | null;
+  ctr: number | null;
+  averageCpcMicros: number | null;
+  averageCpcEuros: number | null;
+  qualityScore: number | null;
+  
+  // ✅ Nuevos campos de conversión
+  conversionsValue: number;
+  allConversions: number;
+  allConversionsValue: number;
+  
+  // ✅ KPIs calculados
+  roas: number;
+  costePorConversion: number;
+  tasaConversion: number;
 }
+
+
 
 
 

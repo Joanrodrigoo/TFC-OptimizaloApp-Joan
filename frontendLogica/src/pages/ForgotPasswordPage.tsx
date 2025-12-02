@@ -17,7 +17,7 @@ const ForgotPasswordPage = () => {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-
+  
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -30,7 +30,7 @@ const ForgotPasswordPage = () => {
     setIsLoading(true);
 
     try {
-      const res = await fetch("https://pwi.es/api/auth/forgot-password", {
+      const res = await fetch("https://optimizalo.app/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
@@ -60,7 +60,7 @@ const ForgotPasswordPage = () => {
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-
+    
     if (password !== confirmPassword) {
       toast({
         variant: "destructive",
@@ -82,7 +82,7 @@ const ForgotPasswordPage = () => {
     setIsLoading(true);
 
     try {
-      const res = await fetch("https://pwi.es/api/auth/reset-password", {
+      const res = await fetch("https://optimizalo.app/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: effectiveEmail, token, newPassword: password }),

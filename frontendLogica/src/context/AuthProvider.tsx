@@ -38,7 +38,7 @@ export const AuthProvider = ({ children }) => {
 
 const logout = async () => {
   try {
-    await fetch("https://pwi.es/api/auth/logout", {
+    await fetch("https://optimizalo.app/api/auth/logout", {
       method: "POST",
       credentials: "include", // Muy importante para que envíe la cookie de sesión
     });

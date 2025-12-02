@@ -12,7 +12,7 @@
   transition: filter 300ms;
 }
 .logo:hover {
-  filter: drop-shadow(0 0 2em #12BAA9aa);
+  filter: drop-shadow(0 0 2em #646cffaa);
 }
 .logo.react:hover {
   filter: drop-shadow(0 0 2em #61dafbaa);
@@ -35,23 +35,8 @@
 
 .card {
   padding: 2em;
-  border: 1px solid #12BAA9;
-  border-radius: 8px;
 }
 
 .read-the-docs {
-  color: #12BAA9;
-}
-
-/* Estilos adicionales usando el color #12BAA9 */
-.accent-color {
-  color: #12BAA9;
-}
-
-.accent-bg {
-  background-color: #12BAA9;
-}
-
-.accent-border {
-  border-color: #12BAA9;
+  color: #888;
 }

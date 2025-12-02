@@ -44,7 +44,7 @@ const AccountsOverview = () => {
 
   const fetchAccounts = async () => {
     try {
-      const response = await fetch("https://pwi.es/api/google-accounts", {
+      const response = await fetch("https://optimizalo.app/api/google-accounts", {
         credentials: "include",
       });
       if (!response.ok) throw new Error("Error al obtener cuentas");
@@ -62,7 +62,7 @@ const AccountsOverview = () => {
   }, []);
 
   const handleConnectAccount = () => {
-    window.location.href = "https://pwi.es/auth";
+    window.location.href = "https://optimizalo.app/auth";
   };
 
   const handleSyncAccount = (accountId: string) => {

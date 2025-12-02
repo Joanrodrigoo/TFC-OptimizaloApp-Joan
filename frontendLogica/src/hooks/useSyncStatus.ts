@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-const API_URL = "https://pwi.es";
+const API_URL = "https://optimizalo.app";
 
 // ====================================
 // TYPES

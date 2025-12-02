@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
+import { subDays } from "date-fns";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,10 +41,14 @@ const AccountDetailPage = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSyncVisible, setIsSyncVisible] = useState(false);
   const [isSyncInProgress, setIsSyncInProgress] = useState(false);
+
+  const yesterday = subDays(new Date(), 1);
+
   const [dateRange, setDateRange] = useState({
-    from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-    to: new Date(),
+    from: subDays(yesterday, 14),
+    to: yesterday,
   });
+
   const [navigation, setNavigation] = useState<NavigationState>({
     level: "campaigns",
   });
@@ -223,7 +228,7 @@ const AccountDetailPage = () => {
               <div id="keywords">
                 <KeywordsList
                   key={`keywords-${account.accountId}-${navigation.selectedCampaign}-${navigation.selectedAdGroup}-${refreshKey}`}
-                  customerId={account.accountId}
+                  accountId={account.accountId}
                   dateRange={dateRange}
                   navigation={navigation}
                 />
@@ -242,15 +247,18 @@ const AccountDetailPage = () => {
               </div>
             )}
             
-            <div id="audiences">
-              <AudiencesList
-                key={`audiences-${account.accountId}-${refreshKey}`}
-                accountId={account.accountId}
-                campaignId={navigation.selectedCampaign}
-                adGroupId={navigation.selectedAdGroup}
-                dateRange={dateRange}
-              />
-            </div>
+            {/* Solo mostrar Audiences si NO es Performance Max */}
+            {selectedCampaignType !== 'PERFORMANCE_MAX' && (
+              <div id="audiences">
+                <AudiencesList
+                  key={`audiences-${account.accountId}-${refreshKey}`}
+                  accountId={account.accountId}
+                  campaignId={navigation.selectedCampaign}
+                  adGroupId={navigation.selectedAdGroup}
+                  dateRange={dateRange}
+                />
+              </div>
+            )}
           </div>
         ) : (
           <Card>
@@ -266,9 +274,9 @@ const AccountDetailPage = () => {
                     <>
                       <Badge variant="outline">Palabras clave</Badge>
                       <Badge variant="outline">Términos de búsqueda</Badge>
+                      <Badge variant="outline">Segmentos de audiencia</Badge>
                     </>
                   )}
-                  <Badge variant="outline">Segmentos de audiencia</Badge>
                 </div>
               </div>
             </CardContent>

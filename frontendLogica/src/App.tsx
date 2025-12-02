@@ -20,9 +20,13 @@ import UserSettingsPage from "./pages/UserSettingsPage";
 import SubscribePage from "./pages/SubscribePage";
 import SubscriptionSuccess from "@/pages/SubscriptionSuccess";
 import SubscriptionCanceled from "@/pages/SubscriptionCanceled";
+import PricingPage from "@/pages/PricingPage";
 
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage"; 
 import AdminView from "@/pages/AdminView";
+import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
+import LegalNoticePage from "./pages/LegalNoticePage";
+import CookiesPolicyPage from "./pages/CookiesPolicyPage";
 
 const queryClient = new QueryClient();
 
@@ -36,8 +40,12 @@ const App = () => (
           <Routes>
             {/* Public Routes */}
             <Route path="/" element={<LandingPage />} />
+            <Route path="/pricing" element={<PricingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/politica-privacidad" element={<PrivacyPolicyPage />} />
+                      <Route path="/aviso-legal" element={<LegalNoticePage />} />
+          <Route path="/politica-cookies" element={<CookiesPolicyPage />} />
             
             {/* Password Reset Routes */}
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />

@@ -18,7 +18,7 @@ export default function GoogleAccountsList() {
   useEffect(() => {
     const fetchAccounts = async () => {
       try {
-        const response = await fetch("https://pwi.es/api/google-accounts", {
+        const response = await fetch("https://optimizalo.app/api/google-accounts", {
           credentials: "include",
         });
 

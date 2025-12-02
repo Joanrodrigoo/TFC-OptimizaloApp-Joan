@@ -14,23 +14,19 @@ interface SyncStatus {
   progressPercentage: number;
   isCompleted: boolean;
 
-  // Información de días
-  totalDays: number;
-  completedDays: number;
+  // CAMBIO: Información de SEMANAS (no días)
+  totalWeeks: number;
+  completedWeeks: number;
   startDate: string | null;
   endDate: string | null;
 
-  dailyTasks: {
-    total: number;
-    completed: number;
-    pending: number;
-  };
   weeklyTasks: {
     total: number;
     completed: number;
     pending: number;
   };
 }
+
 
 interface SyncProgressBarProps {
   customerId: string;
@@ -66,7 +62,7 @@ const SyncProgressBar = ({
     const fetchStatus = async () => {
       try {
         const response = await fetch(
-          `https://pwi.es/api/sync-status/${customerId}`,
+          `https://optimizalo.app/api/sync-status/${customerId}`,
           {
             credentials: "include",
           }
@@ -86,9 +82,8 @@ const SyncProgressBar = ({
         if (data.pending > 0 || data.processing > 0) {
           setSyncStatus(data);
           setIsVisible(true);
-          setHasNotifiedCompletion(false); // Reset si vuelve a procesar
+          setHasNotifiedCompletion(false);
         } else if (data.isCompleted && !hasNotifiedCompletion) {
-          // Si es el primer fetch y ya está completado, no mostrar el banner
           if (isFirstFetch) {
             setIsVisible(false);
             setHasNotifiedCompletion(true);
@@ -96,17 +91,14 @@ const SyncProgressBar = ({
               onComplete();
             }
           } else {
-            // Si estaba visible y ahora se completó, mostrarlo 5 segundos
             setSyncStatus(data);
             setIsVisible(true);
             setHasNotifiedCompletion(true);
 
-            // Notificar completado una sola vez
             if (onComplete) {
               onComplete();
             }
 
-            // Ocultar después de 5 segundos
             setTimeout(() => {
               setIsVisible(false);
             }, 5000);
@@ -114,10 +106,12 @@ const SyncProgressBar = ({
         } else {
           setIsVisible(false);
         }
+
         if (onSyncStatusChange) {
           const isSyncing = data.pending > 0 || data.processing > 0;
           onSyncStatusChange(isSyncing);
         }
+
         isFirstFetch = false;
       } catch (err) {
         console.error("Error fetching sync status:", err);
@@ -135,7 +129,7 @@ const SyncProgressBar = ({
   const handleRetry = async () => {
     try {
       const response = await fetch(
-        `https://pwi.es/api/sync-queue/${customerId}/retry`,
+        `https://optimizalo.app/api/sync-queue/${customerId}/retry`,
         {
           method: "POST",
           credentials: "include",
@@ -148,7 +142,7 @@ const SyncProgressBar = ({
 
       const data = await response.json();
       console.log(`✅ ${data.retried} tareas reiniciadas`);
-      setHasNotifiedCompletion(false); // Reset para permitir nueva notificación
+      setHasNotifiedCompletion(false);
     } catch (err) {
       console.error("Error retrying tasks:", err);
       setError(err instanceof Error ? err.message : "Error al reintentar");
@@ -167,98 +161,102 @@ const SyncProgressBar = ({
 
   if (!isVisible || !syncStatus) return null;
 
-  const {
-    progressPercentage,
-    isCompleted,
-    failed,
-    processing,
-    totalDays = 0,
-    completedDays = 0,
-    startDate,
-    endDate,
-  } = syncStatus;
+const {
+  progressPercentage,
+  isCompleted,
+  failed,
+  processing,
+  totalWeeks = 0,      // CAMBIO: usar totalWeeks
+  completedWeeks = 0,  // CAMBIO: usar completedWeeks
+  startDate,
+  endDate,
+} = syncStatus;
+
 
   // Determinar estado
   const hasErrors = failed > 0;
   const isProcessing = processing > 0;
 
+  // Determinar icono y color
+const getStatusConfig = () => {
+  if (isCompleted) {
+    return {
+      icon: <CheckCircle className="h-4 w-4 text-white" />,
+      bgColor: "bg-green-500",
+      progressColor: "[&>div]:bg-green-500",
+      message: "✅ Sincronización completada",
+    };
+  }
+  if (hasErrors) {
+    return {
+      icon: <XCircle className="h-4 w-4 text-white" />,
+      bgColor: "bg-red-500",
+      progressColor: "[&>div]:bg-red-500",
+      message: "⚠️ Sincronización con errores",
+    };
+  }
+  if (isProcessing) {
+    return {
+      icon: <Clock className="h-4 w-4 text-white animate-pulse" />,
+      bgColor: "bg-teal-500",
+      progressColor: "",
+      message:
+        totalWeeks > 0  // CAMBIO: usar totalWeeks
+          ? `Importando datos: ${completedWeeks} de ${totalWeeks} semanas sincronizadas`  // CAMBIO: mensaje con "semanas"
+          : "Sincronizando datos...",
+    };
+  }
+  return {
+    icon: <AlertCircle className="h-4 w-4 text-white" />,
+    bgColor: "bg-blue-500",
+    progressColor: "",
+    message: "Preparando sincronización...",
+  };
+};
+
+
+  const statusConfig = getStatusConfig();
+
   return (
-    <div className="fixed top-16 left-0 md:top-0 md:left-64 right-0 z-40 bg-background/95 backdrop-blur-sm border-b shadow-sm animate-slide-in-down">
-      <div className="container mx-auto px-4 sm:px-6 py-3">
-        <div className="flex items-center gap-3 sm:gap-4">
+    <div className="sticky top-0 left-0 md:left-64 right-0 z-30 bg-background border-b-2 rounded-b-lg shadow-lg animate-slide-in-down">
+      <div className="container mx-auto px-4 py-3">
+        <div className="flex items-center gap-4">
           {/* Status Icon */}
-          <div
-            className={`flex-shrink-0 p-2 rounded-lg ${
-              isCompleted
-                ? "bg-green-500"
-                : hasErrors
-                ? "bg-red-500"
-                : isProcessing
-                ? "bg-teal-500"
-                : "bg-blue-500"
-            }`}
-          >
-            {isCompleted ? (
-              <CheckCircle className="h-4 w-4 text-white" />
-            ) : hasErrors ? (
-              <XCircle className="h-4 w-4 text-white" />
-            ) : isProcessing ? (
-              <Clock className="h-4 w-4 text-white animate-pulse" />
-            ) : (
-              <AlertCircle className="h-4 w-4 text-white" />
-            )}
+          <div className={`flex-shrink-0 p-2 ${statusConfig.bgColor} rounded-lg`}>
+            {statusConfig.icon}
           </div>
 
           {/* Content */}
           <div className="flex-1 min-w-0">
-            <div className="mb-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div className="min-w-0 leading-tight">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
-                  <span className="text-sm font-medium">
-                    {isCompleted
-                      ? "✅ Sincronización completada"
-                      : hasErrors
-                      ? `⚠️ Sincronización con errores`
-                      : isProcessing
-                      ? totalDays > 0
-                        ? `Importando datos: ${completedDays} de ${totalDays} días importados`
-                        : `Sincronizando datos...`
-                      : `Preparando sincronización...`}
+            <div className="mb-2 flex items-center justify-between">
+              <div>
+                <span className="text-sm font-medium">
+                  {statusConfig.message}
+                </span>
+                {startDate && endDate && !isCompleted && (
+                  <span className="text-xs text-muted-foreground ml-2">
+                    · Desde {formatDate(startDate)} hasta {formatDate(endDate)}
                   </span>
-
-                  {startDate && endDate && !isCompleted && (
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">
-                      Desde {formatDate(startDate)} hasta {formatDate(endDate)}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {hasErrors && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleRetry}
-                    className="h-7 text-xs"
-                  >
-                    Reintentar
-                  </Button>
                 )}
               </div>
+
+              {/* Retry Button */}
+              {hasErrors && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRetry}
+                  className="h-7 text-xs ml-2"
+                >
+                  Reintentar
+                </Button>
+              )}
             </div>
 
             {/* Progress Bar */}
             <Progress
               value={progressPercentage}
-              className={`h-2 ${
-                isCompleted
-                  ? "[&>div]:bg-green-500"
-                  : hasErrors
-                  ? "[&>div]:bg-red-500"
-                  : ""
-              }`}
+              className={`h-2 ${statusConfig.progressColor}`}
             />
 
             {/* Error message */}

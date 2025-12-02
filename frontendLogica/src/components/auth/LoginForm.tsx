@@ -14,67 +14,66 @@ const LoginForm = () => {
 
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { login } = useAuth(); // ✅ Usar el método login del AuthProvider
+  const { login } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setIsLoading(true);
+    e.preventDefault();
+    setIsLoading(true);
 
-  try {
-    console.log('🔐 Intentando login...');
+    try {
+      console.log('🔐 Intentando login...');
 
-    const result = await login(email, password);
+      const result = await login(email, password);
 
-    if (result.success) {
-      console.log('✅ Login exitoso desde LoginForm:', result.user);
-      console.log("🔐 Rol del usuario:", result.user.role);
-      console.log("📊 Estado de suscripción:", result.user.is_active);
+      if (result.success) {
+        console.log('✅ Login exitoso desde LoginForm:', result.user);
+        console.log("🔐 Rol del usuario:", result.user.role);
+        console.log("📊 Estado de suscripción:", result.user.is_active);
 
-      localStorage.setItem("user", JSON.stringify(result.user));
-      
-      toast({
-        title: "Inicio de sesión correcto",
-        description: "¡Bienvenido de nuevo a AdOps AI!",
-      });
+        localStorage.setItem("user", JSON.stringify(result.user));
+        
+        toast({
+          title: "Inicio de sesión correcto",
+          description: "¡Bienvenido de nuevo a AdOps AI!",
+        });
 
-      // 👉 Verificar primero si la cuenta está activa
-      if (result.user.is_active === 0 || result.user.is_active === false) {
-        console.log("⚠️ Usuario inactivo, redirigiendo a suscripción");
-        navigate("/subscribe");
-        return;
-      }
+        // Verificar primero si la cuenta está activa
+        if (result.user.is_active === 0 || result.user.is_active === false) {
+          console.log("⚠️ Usuario inactivo, redirigiendo a suscripción");
+          navigate("/subscribe");
+          return;
+        }
 
-      // 👉 Redirección según rol (solo si está activo)
-      if (result.user.role === "admin") {
-        navigate("/admin");
+        // Redirección según rol (solo si está activo)
+        if (result.user.role === "admin") {
+          navigate("/admin");
+        } else {
+          navigate("/dashboard");
+        }
+
       } else {
-        navigate("/dashboard");
+        throw new Error(result.error || "Credenciales inválidas");
       }
 
-    } else {
-      throw new Error(result.error || "Credenciales inválidas");
+    } catch (error: any) {
+      console.error('❌ Error en login:', error);
+
+      toast({
+        variant: "destructive",
+        title: "Error de inicio de sesión",
+        description: error.message || "Error inesperado.",
+      });
+    } finally {
+      setIsLoading(false);
     }
-
-  } catch (error) {
-    console.error('❌ Error en login:', error);
-
-    toast({
-      variant: "destructive",
-      title: "Error de inicio de sesión",
-      description: error.message || "Error inesperado.",
-    });
-  } finally {
-    setIsLoading(false);
-  }
-};
-
+  };
 
   return (
     <Card className="w-full max-w-md mx-auto">
       <CardHeader>
-        <CardTitle className="text-2xl">Welcome back</CardTitle>
+        <CardTitle className="text-2xl">Iniciar sesión</CardTitle>
         <CardDescription>
-          Sign in to your AdOps AI account
+          Accede a tu cuenta
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -91,9 +90,9 @@ const LoginForm = () => {
                 required
               />
             </div>
-
+            
             <div className="flex flex-col space-y-1.5">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Contraseña</Label>
               <Input
                 id="password"
                 type="password"
@@ -104,32 +103,32 @@ const LoginForm = () => {
               />
             </div>
           </div>
-
+          
           <div className="flex justify-end mt-2">
-            <Link
-              to="/forgot-password"
+            <Link 
+              to="/forgot-password" 
               className="text-sm text-adops-600 hover:underline"
             >
-              Forgot password?
+              ¿Olvidaste tu contraseña?
             </Link>
           </div>
-
+          
           <div className="mt-6">
-            <Button
-              type="submit"
+            <Button 
+              type="submit" 
               className="w-full bg-adops-600 hover:bg-adops-700"
               disabled={isLoading}
             >
-              {isLoading ? "Signing in..." : "Sign in"}
+              {isLoading ? "Iniciando sesión..." : "Iniciar sesión"}
             </Button>
           </div>
         </form>
       </CardContent>
       <CardFooter className="flex justify-center">
         <p className="text-sm text-muted-foreground">
-          Don't have an account?{" "}
+          ¿No tienes una cuenta?{" "}
           <Link to="/register" className="text-adops-600 hover:underline">
-            Sign up
+            Crea una
           </Link>
         </p>
       </CardFooter>

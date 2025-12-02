@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Home, Database, Search, Settings, PlusCircle, Building, Users, HelpCircle, LogOut } from "lucide-react";
+import logoWhite from "@/assets/logo-white.png";
 import { 
   Select,
   SelectContent,
@@ -35,7 +36,7 @@ const Sidebar = ({ className }) => {
   // Fetch cuentas
   const fetchAccounts = async () => {
     try {
-      const response = await fetch("https://pwi.es/api/google-accounts", {
+      const response = await fetch("https://optimizalo.app/api/google-accounts", {
         credentials: "include",
       });
       if (!response.ok) throw new Error("Error al obtener cuentas");
@@ -51,7 +52,7 @@ const Sidebar = ({ className }) => {
   // Fetch usuario
   const fetchUserData = async () => {
     try {
-      const response = await fetch("https://pwi.es/api/auth/profile", {
+      const response = await fetch("https://optimizalo.app/api/auth/profile", {
         method: "GET",
         credentials: "include",
       });
@@ -83,7 +84,7 @@ const Sidebar = ({ className }) => {
     navigate("/login");
   };
 
-  // Organización de cuentas como en el archivo funcional
+  // Organización de cuentas
   const mainAccounts = accounts.filter(
     (a) => a.accountType === "STANDARD" && !a.parentAccountId
   );
@@ -104,24 +105,36 @@ const Sidebar = ({ className }) => {
 
   return (
     <div className={cn("pb-0 bg-slate-800 text-white h-screen sticky top-0 overflow-y-auto w-64", className)}>
-      <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col">
         {/* Header */}
         <div className="px-4 py-6 border-b border-slate-700">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-teal-500 rounded-lg flex items-center justify-center">
-              <Building className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold text-white">AdOps AI</h1>
-            </div>
+            <img 
+              src={logoWhite}
+              alt="AdOps AI" 
+              className="h-10"
+            />
           </div>
         </div>
 
         {/* Account Selector */}
         <div className="px-4 py-4 border-b border-slate-700">
           <Select value={selectedAccount} onValueChange={handleAccountChange} disabled={loading}>
-            <SelectTrigger className="w-full bg-slate-700 border-slate-600 text-white">
-              <SelectValue placeholder={loading ? "Cargando..." : "Seleccionar cuenta"} />
+            <SelectTrigger className="w-full bg-slate-700 border-slate-600 text-white h-auto min-h-10 py-2">
+              <SelectValue placeholder={loading ? "Cargando..." : "Seleccionar cuenta"}>
+                {selectedAccount && (() => {
+                  const account = accounts.find(a => a.id === selectedAccount);
+                  if (account) {
+                    return (
+                      <div className="flex flex-col items-start text-left w-full">
+                        <span className="font-medium text-sm">{account.accountName}</span>
+                        <span className="text-xs text-slate-400">{account.accountId}</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent className="bg-slate-700 border-slate-600">
               {mainAccounts.map((account) => (
@@ -157,15 +170,11 @@ const Sidebar = ({ className }) => {
                       <SelectItem 
                         key={subAccount.id}
                         value={subAccount.id}
-                        className="text-white hover:bg-slate-600 focus:bg-slate-600 pl-6"
+                        className="text-white hover:bg-slate-600 focus:bg-slate-600 pl-4"
                       >
-                        <div className="flex flex-col min-w-0">
-                          <span className="font-medium text-sm truncate" title={`└ ${subAccount.accountName}`}>
-                            └ {subAccount.accountName}
-                          </span>
-                          <span className="text-xs text-slate-400 truncate" title={subAccount.accountId}>
-                            {subAccount.accountId}
-                          </span>
+                        <div className="flex flex-col">
+                          <span className="font-medium text-sm">└ {subAccount.accountName}</span>
+                          <span className="text-xs text-slate-400">{subAccount.accountId}</span>
                         </div>
                       </SelectItem>
                     ))}
@@ -186,9 +195,6 @@ const Sidebar = ({ className }) => {
         <div className="flex-1 py-4">
           {/* Dashboard Section */}
           <div className="px-4 mb-6">
-            <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">
-              Dashboard
-            </h2>
             <div className="space-y-1">
               <Button
                 variant="ghost"
@@ -206,52 +212,6 @@ const Sidebar = ({ className }) => {
               
               {/* Separador debajo de Overview */}
               <div className="my-3 border-t border-slate-700"></div>
-              
-              {/* Account Navigation Icons - Only show when on account detail page */}
-              {isAccountDetailPage && (
-                <>
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-start text-white hover:bg-slate-700 text-sm"
-                    onClick={() => scrollToSection('recommendations')}
-                  >
-                    <Search className="mr-3 h-4 w-4" />
-                    Recomendaciones
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-start text-white hover:bg-slate-700 text-sm"
-                    onClick={() => scrollToSection('campaigns')}
-                  >
-                    <Database className="mr-3 h-4 w-4" />
-                    Campañas
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-start text-white hover:bg-slate-700 text-sm"
-                    onClick={() => scrollToSection('keywords')}
-                  >
-                    <Settings className="mr-3 h-4 w-4" />
-                    Keywords
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-start text-white hover:bg-slate-700 text-sm"
-                    onClick={() => scrollToSection('search-terms')}
-                  >
-                    <Search className="mr-3 h-4 w-4" />
-                    Términos de Búsqueda
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-start text-white hover:bg-slate-700 text-sm"
-                    onClick={() => scrollToSection('audiences')}
-                  >
-                    <Users className="mr-3 h-4 w-4" />
-                    Audiencias
-                  </Button>
-                </>
-              )}
             </div>
           </div>
         </div>
@@ -261,7 +221,7 @@ const Sidebar = ({ className }) => {
           <Button
             className="w-full bg-teal-500 hover:bg-teal-600 text-white font-medium"
             onClick={() => {
-              window.location.href = "https://pwi.es/auth";
+              window.location.href = "https://optimizalo.app/auth";
             }}
           >
             <PlusCircle className="mr-3 h-4 w-4" />

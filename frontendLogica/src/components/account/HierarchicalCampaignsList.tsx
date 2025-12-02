@@ -50,6 +50,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "../ui/breadcrumb";
+import AssetPreviewModal from "./AssetPreviewModal";
 
 interface HierarchicalCampaignsListProps {
   accountId: string;
@@ -74,7 +75,6 @@ type SortOrder = "asc" | "desc";
 interface CampaignWithMetrics extends Record<string, unknown> {
   id: string;
   name: string;
-  status: string;
   type: string;
   budget: number;
   spend: number;
@@ -83,6 +83,24 @@ interface CampaignWithMetrics extends Record<string, unknown> {
   conversions: number;
   ctr: number;
   cpc: number;
+
+  // ✅ Nuevos campos para conversiones
+  conversions_value: number; // Valor total conversiones primarias
+  all_conversions: number; // Total de todas las conversiones
+  all_conversions_value: number; // Valor total de todas las conversiones
+
+  // ✅ KPIs calculados
+  roas: number; // Return on Ad Spend
+  coste_por_conversion: number; // Coste por conversión en €
+  tasa_conversion_porcentaje: number; // Tasa de conversión en %
+
+  // ✅ Otros campos del endpoint (opcional, según necesites)
+  cost_per_conversion_micros?: number; // Coste por conversión original
+  conversion_rate?: number; // Tasa desde API
+  value_per_all_conversions?: number; // Valor medio por conversión
+  search_impression_share?: number; // % cuota de impresiones
+  search_rank_lost_impression_share?: number;
+  search_budget_lost_impression_share?: number;
 }
 
 interface AdGroup extends Record<string, unknown> {
@@ -98,6 +116,16 @@ interface AdGroup extends Record<string, unknown> {
   conversions: number;
   ctr: number;
   cpc: number;
+
+  // ✅ Nuevos campos de conversión
+  conversions_value: number; // Valor conversiones primarias
+  all_conversions: number; // Total conversiones
+  all_conversions_value: number; // Valor total conversiones
+
+  // ✅ KPIs calculados
+  roas: number; // Return on Ad Spend
+  coste_por_conversion: number; // Coste por conversión
+  tasa_conversion: number; // Tasa de conversión (%)
 }
 
 interface Ad extends Record<string, unknown> {
@@ -126,6 +154,16 @@ interface Ad extends Record<string, unknown> {
   sitelinks?: Array<{ title: string; url: string }>;
   images?: string[];
   videos?: string[];
+
+  // ✅ Nuevos campos de conversión
+  conversions_value: number; // Valor conversiones primarias
+  all_conversions: number; // Total conversiones
+  all_conversions_value: number; // Valor total conversiones
+
+  // ✅ KPIs calculados
+  roas: number; // Return on Ad Spend
+  coste_por_conversion: number; // Coste por conversión
+  tasa_conversion: number; // Tasa de conversión (%)
 }
 
 interface AssetGroup extends Record<string, unknown> {
@@ -139,9 +177,18 @@ interface AssetGroup extends Record<string, unknown> {
   ctr: number;
   cost: number;
   conversions: number;
-  conversionsValue: number;
+  conversionsValue: number; // Ya lo tenías
   videoViews: number;
   engagementRate: number;
+
+  // ✅ Nuevos campos de conversión (si aún no los tienes)
+  allConversions: number; // Total conversiones
+  allConversionsValue: number; // Valor total conversiones
+
+  // ✅ KPIs calculados
+  roas: number; // Return on Ad Spend
+  costePorConversion: number; // Coste por conversión
+  tasaConversion: number; // Tasa de conversión (%)
 }
 
 interface Asset extends Record<string, unknown> {
@@ -152,12 +199,23 @@ interface Asset extends Record<string, unknown> {
   textValue: string | null;
   imageUrl: string | null;
   youtubeVideoId: string | null;
+  youtubeLink: string | null;
   performanceLabel: string;
   impressions: number;
   clicks: number;
   ctr: number;
   cost: number;
   conversions: number;
+
+  // ✅ Nuevos campos de conversión
+  conversionsValue: number; // Valor conversiones primarias
+  allConversions: number; // Total conversiones
+  allConversionsValue: number; // Valor total conversiones
+
+  // ✅ KPIs calculados
+  roas: number; // Return on Ad Spend
+  costePorConversion: number; // Coste por conversión
+  tasaConversion: number; // Tasa de conversión (%)
 }
 
 interface ApiError extends Error {
@@ -227,6 +285,48 @@ const FieldTypeMap: Record<string, string> = {
   "32": "Imagen vertical alta",
   "33": "Vídeos YouTube relacionados",
 };
+// Función para calcular performance dinámicamente
+const calculatePerformanceLabel = (asset: Asset): string => {
+  // Si el performance no es PENDING, devolver el valor original
+  if (asset.performanceLabel !== "PENDING") {
+    return asset.performanceLabel;
+  }
+
+  // Si no hay impresiones, mantener PENDING
+  if (asset.impressions === 0) {
+    return "PENDING";
+  }
+
+  // Calcular métricas
+  const hasConversions = asset.conversions > 0;
+  const hasClicks = asset.clicks > 0;
+  const ctr = asset.ctr || 0;
+  const conversionRate = asset.tasaConversion || 0;
+
+  // Criterios de rendimiento
+  // BEST: Tiene conversiones Y (CTR > 2% O tasa conversión > 3%)
+  if (hasConversions && (ctr > 2 || conversionRate > 3)) {
+    return "BEST";
+  }
+
+  // GOOD: Tiene conversiones O (CTR > 1.5% Y clicks > 10)
+  if (hasConversions || (ctr > 1.5 && asset.clicks > 10)) {
+    return "GOOD";
+  }
+
+  // LOW: CTR < 0.5% O (impresiones > 100 Y clicks < 5)
+  if (ctr < 0.5 || (asset.impressions > 100 && asset.clicks < 5)) {
+    return "LOW";
+  }
+
+  // AVERAGE: Todo lo demás con datos
+  if (hasClicks || asset.impressions > 0) {
+    return "AVERAGE";
+  }
+
+  // Sin datos suficientes
+  return "PENDING";
+};
 
 const HierarchicalCampaignsList = ({
   accountId,
@@ -241,7 +341,6 @@ const HierarchicalCampaignsList = ({
   const [isAdModalOpen, setIsAdModalOpen] = useState(false);
   const [sortField, setSortField] = useState<SortField>("impressions");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const isMobile = useIsMobile();
 
@@ -262,28 +361,13 @@ const HierarchicalCampaignsList = ({
   const [adsLoading, setAdsLoading] = useState(false);
   const [assetGroupsLoading, setAssetGroupsLoading] = useState(false);
   const [assetsLoading, setAssetsLoading] = useState(false);
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [isAssetModalOpen, setIsAssetModalOpen] = useState(false);
 
   const [recommendationsCount, setRecommendationsCount] = useState<
     Record<string, number>
   >({});
   const [error, setError] = useState<string | null>(null);
-
-  const getAvailableStatuses = (items: any[]) => {
-    const statuses = new Set<string>();
-    items.forEach((item) => {
-      if (item.status) statuses.add(item.status);
-    });
-
-    const statusOptions = [{ value: "all", label: "Todos los estados" }];
-    if (statuses.has("ENABLED"))
-      statusOptions.push({ value: "ENABLED", label: "Activos" });
-    if (statuses.has("PAUSED"))
-      statusOptions.push({ value: "PAUSED", label: "Pausados" });
-    if (statuses.has("REMOVED"))
-      statusOptions.push({ value: "REMOVED", label: "Eliminados" });
-
-    return statusOptions;
-  };
 
   const getAvailableTypes = (campaigns: CampaignWithMetrics[]) => {
     const types = new Set<string>();
@@ -520,11 +604,45 @@ const HierarchicalCampaignsList = ({
             AdvertisingChannelTypeMap[campaign.campaign_type] ?? "UNSPECIFIED",
           budget: convertMicrosToEuros(campaign.budget_micros || "0"),
           spend: parseFloat(campaign.cost_micros || "0"),
-          impressions: parseInt(campaign.impressions || "0"),
-          clicks: parseInt(campaign.clicks || "0"),
+          impressions: parseInt(campaign.impressions || "0", 10),
+          clicks: parseInt(campaign.clicks || "0", 10),
           conversions: parseFloat(campaign.conversions || "0"),
           ctr: parseFloat(campaign.ctr || "0"),
-          cpc: parseFloat(campaign.cost_per_conversion_micros || "0"),
+          cpc: parseFloat(campaign.average_cpc_micros || "0"), // ✅ Corregido: era cost_per_conversion_micros
+
+          // ✅ Nuevos campos de conversión
+          conversions_value: parseFloat(campaign.conversions_value || "0"),
+          all_conversions: parseFloat(campaign.all_conversions || "0"),
+          all_conversions_value: parseFloat(
+            campaign.all_conversions_value || "0"
+          ),
+
+          // ✅ KPIs calculados
+          roas: parseFloat(campaign.roas || "0"),
+          coste_por_conversion: parseFloat(
+            campaign.coste_por_conversion || "0"
+          ),
+          tasa_conversion_porcentaje: parseFloat(
+            campaign.tasa_conversion_porcentaje || "0"
+          ),
+
+          // ✅ Campos opcionales adicionales (si los necesitas en el front)
+          cost_per_conversion_micros: parseFloat(
+            campaign.cost_per_conversion_micros || "0"
+          ),
+          conversion_rate: parseFloat(campaign.conversion_rate || "0"),
+          value_per_all_conversions: parseFloat(
+            campaign.value_per_all_conversions || "0"
+          ),
+          search_impression_share: parseFloat(
+            campaign.search_impression_share || "0"
+          ),
+          search_rank_lost_impression_share: parseFloat(
+            campaign.search_rank_lost_impression_share || "0"
+          ),
+          search_budget_lost_impression_share: parseFloat(
+            campaign.search_budget_lost_impression_share || "0"
+          ),
         })
       );
 
@@ -581,12 +699,29 @@ const HierarchicalCampaignsList = ({
           status: AdGroupStatusMap[String(adGroup.status)] || "UNKNOWN",
           bid: adGroup.bid ? parseFloat(String(adGroup.bid)) : null,
           spend: parseFloat(String(adGroup.cost || adGroup.spend || "0")),
-          impressions: parseInt(String(adGroup.impressions || "0")),
-          clicks: parseInt(String(adGroup.clicks || "0")),
+          impressions: parseInt(String(adGroup.impressions || "0"), 10),
+          clicks: parseInt(String(adGroup.clicks || "0"), 10),
           conversions: parseFloat(String(adGroup.conversions || "0")),
           ctr: parseFloat(String(adGroup.ctr || "0")),
           cpc: parseFloat(String(adGroup.average_cpc || adGroup.cpc || "0")),
+
+          // ✅ Nuevos campos de conversión
+          conversions_value: parseFloat(
+            String(adGroup.conversions_value || "0")
+          ),
+          all_conversions: parseFloat(String(adGroup.all_conversions || "0")),
+          all_conversions_value: parseFloat(
+            String(adGroup.all_conversions_value || "0")
+          ),
+
+          // ✅ KPIs calculados
+          roas: parseFloat(String(adGroup.roas || "0")),
+          coste_por_conversion: parseFloat(
+            String(adGroup.coste_por_conversion || "0")
+          ),
+          tasa_conversion: parseFloat(String(adGroup.tasa_conversion || "0")),
         }));
+
         setAdGroups(mappedAdGroups);
       } catch (err: unknown) {
         const apiError = err as ApiError;
@@ -654,6 +789,15 @@ const HierarchicalCampaignsList = ({
           conversionsValue: Number(ag.conversionsValue) || 0,
           videoViews: Number(ag.videoViews) || 0,
           engagementRate: Number(ag.engagementRate) || 0,
+
+          // ✅ Nuevos campos de conversión
+          allConversions: Number(ag.allConversions) || 0,
+          allConversionsValue: Number(ag.allConversionsValue) || 0,
+
+          // ✅ KPIs calculados
+          roas: Number(ag.roas) || 0,
+          costePorConversion: Number(ag.costePorConversion) || 0,
+          tasaConversion: Number(ag.tasaConversion) || 0,
         }));
 
         setAssetGroups(mappedAssetGroups);
@@ -777,6 +921,20 @@ const HierarchicalCampaignsList = ({
             sitelinks: sitelinks,
             images: images,
             videos: [],
+
+            // ✅ Nuevos campos de conversión
+            conversions_value: parseFloat(String(ad.conversions_value || "0")),
+            all_conversions: parseFloat(String(ad.all_conversions || "0")),
+            all_conversions_value: parseFloat(
+              String(ad.all_conversions_value || "0")
+            ),
+
+            // ✅ KPIs calculados
+            roas: parseFloat(String(ad.roas || "0")),
+            coste_por_conversion: parseFloat(
+              String(ad.coste_por_conversion || "0")
+            ),
+            tasa_conversion: parseFloat(String(ad.tasa_conversion || "0")),
           };
         });
 
@@ -838,12 +996,23 @@ const HierarchicalCampaignsList = ({
           textValue: asset.textValue || null,
           imageUrl: asset.imageUrl || null,
           youtubeVideoId: asset.youtubeVideoId || null,
+          youtubeLink: asset.youtubeLink || null,
           performanceLabel: asset.performanceLabel || "UNSPECIFIED",
           impressions: Number(asset.impressions) || 0,
           clicks: Number(asset.clicks) || 0,
           ctr: Number(asset.ctr) || 0,
           cost: Number(asset.cost) || 0,
           conversions: Number(asset.conversions) || 0,
+
+          // ✅ Nuevos campos de conversión
+          conversionsValue: Number(asset.conversionsValue) || 0,
+          allConversions: Number(asset.allConversions) || 0,
+          allConversionsValue: Number(asset.allConversionsValue) || 0,
+
+          // ✅ KPIs calculados
+          roas: Number(asset.roas) || 0,
+          costePorConversion: Number(asset.costePorConversion) || 0,
+          tasaConversion: Number(asset.tasaConversion) || 0,
         }));
 
         setAssets(mappedAssets);
@@ -967,19 +1136,6 @@ const HierarchicalCampaignsList = ({
     });
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "ENABLED":
-        return <Badge className="bg-green-500">Activo</Badge>;
-      case "PAUSED":
-        return <Badge variant="outline">Pausado</Badge>;
-      case "REMOVED":
-        return <Badge variant="destructive">Eliminado</Badge>;
-      default:
-        return <Badge variant="secondary">Desconocido</Badge>;
-    }
-  };
-
   const getTypeBadge = (type: string) => {
     const typeStyles = {
       SEARCH: "bg-blue-100 text-blue-800",
@@ -1053,7 +1209,7 @@ const HierarchicalCampaignsList = ({
     children: React.ReactNode;
   }) => (
     <TableHead
-      className="cursor-pointer hover:bg-muted/50 select-none"
+      className="cursor-pointer hover:bg-muted/50 select-none whitespace-nowrap"
       onClick={() => handleSort(field)}
     >
       <div className="flex items-center gap-1">
@@ -1110,10 +1266,8 @@ const HierarchicalCampaignsList = ({
       const matchesSearch = campaign.name
         .toLowerCase()
         .includes(searchTerm.toLowerCase());
-      const matchesStatus =
-        statusFilter === "all" || campaign.status === statusFilter;
       const matchesType = typeFilter === "all" || campaign.type === typeFilter;
-      return matchesSearch && matchesStatus && matchesType;
+      return matchesSearch && matchesType;
     });
 
     const sortedCampaigns = sortCampaigns(
@@ -1150,7 +1304,6 @@ const HierarchicalCampaignsList = ({
                   },
                 ]}
                 onClearAll={() => {
-                  setStatusFilter("all");
                   setTypeFilter("all");
                 }}
               />
@@ -1188,7 +1341,6 @@ const HierarchicalCampaignsList = ({
                         <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                       </div>
                       <div className="flex gap-2 mb-3">
-                        {getStatusBadge(campaign.status)}
                         {getTypeBadge(campaign.type)}
                       </div>
 
@@ -1202,9 +1354,15 @@ const HierarchicalCampaignsList = ({
                           </div>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">Gasto:</span>
+                          <span className="text-muted-foreground">Coste:</span>
                           <div className="font-medium">
                             {formatCurrency(campaign.spend)}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">CPC:</span>
+                          <div className="font-medium">
+                            {formatCurrency(campaign.cpc)}
                           </div>
                         </div>
                         <div>
@@ -1228,23 +1386,37 @@ const HierarchicalCampaignsList = ({
                           </div>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">CPC:</span>
+                          <span className="text-muted-foreground">
+                            Tasa de Conversión:
+                          </span>
                           <div className="font-medium">
-                            {formatCurrency(campaign.cpc)}
+                            {campaign.tasa_conversion_porcentaje.toFixed(2)}%
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Conversiones
+                        </div>
+                        <div className="font-medium">
+                          {Math.round(campaign.conversions)}
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">
+                            Coste/Conv:
+                          </span>
+                          <div className="font-medium">
+                            {campaign.coste_por_conversion.toFixed(2)}€
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">ROAS:</span>
+                          <div className="font-medium">
+                            {campaign.roas.toFixed(2)}
                           </div>
                         </div>
                       </div>
 
                       <div className="mt-3 pt-3 border-t">
                         <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-xs text-muted-foreground">
-                              Conversiones
-                            </div>
-                            <div className="font-medium">
-                              {campaign.conversions}
-                            </div>
-                          </div>
                           <AIIndicator type="campaign" id={campaign.id} />
                         </div>
                       </div>
@@ -1260,9 +1432,6 @@ const HierarchicalCampaignsList = ({
                       <SortableHeader field="name">
                         <span className="font-bold">Campaña</span>
                       </SortableHeader>
-                      <SortableHeader field="status">
-                        <span className="font-bold">Estado</span>
-                      </SortableHeader>
                       <SortableHeader field="type">
                         <span className="font-bold">Tipo</span>
                       </SortableHeader>
@@ -1270,7 +1439,10 @@ const HierarchicalCampaignsList = ({
                         <span className="font-bold">Presupuesto</span>
                       </SortableHeader>
                       <SortableHeader field="spend">
-                        <span className="font-bold">Gasto</span>
+                        <span className="font-bold">Coste</span>
+                      </SortableHeader>
+                      <SortableHeader field="cpc">
+                        <span className="font-bold">CPC</span>
                       </SortableHeader>
                       <SortableHeader field="impressions">
                         <span className="font-bold">Impresiones</span>
@@ -1281,14 +1453,20 @@ const HierarchicalCampaignsList = ({
                       <SortableHeader field="ctr">
                         <span className="font-bold">CTR</span>
                       </SortableHeader>
-                      <SortableHeader field="cpc">
-                        <span className="font-bold">CPC</span>
+                      <SortableHeader field="conversionRate">
+                        <span className="font-bold">Tasa de Conversión</span>
                       </SortableHeader>
                       <SortableHeader field="conversions">
                         <span className="font-bold">Conversiones</span>
                       </SortableHeader>
+                      <SortableHeader field="costPerConversion">
+                        <span className="font-bold">Coste/Conv</span>
+                      </SortableHeader>
+                      <SortableHeader field="roas">
+                        <span className="font-bold">ROAS</span>
+                      </SortableHeader>
                       <TableHead
-                        className="sticky right-0 border-l-2 border-r-2 border-t-2 w-20 text-center px-4 font-bold"
+                        className="sticky right-0 border-l-2 border-r-2 border-t-2 w-20 text-center px-4 font-bold whitespace-nowrap"
                         style={{
                           backgroundColor: "#12BAA9",
                           borderLeftColor: "#12BAA9",
@@ -1299,7 +1477,7 @@ const HierarchicalCampaignsList = ({
                       >
                         IA
                       </TableHead>
-                      <TableHead className="w-8 font-bold"></TableHead>
+                      <TableHead className="w-8 font-bold whitespace-nowrap"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1318,12 +1496,12 @@ const HierarchicalCampaignsList = ({
                         <TableCell className="font-medium">
                           {campaign.name}
                         </TableCell>
-                        <TableCell>{getStatusBadge(campaign.status)}</TableCell>
                         <TableCell>{getTypeBadge(campaign.type)}</TableCell>
                         <TableCell>
                           {formatCurrency(campaign.budget)}/día
                         </TableCell>
                         <TableCell>{formatCurrency(campaign.spend)}</TableCell>
+                        <TableCell>{formatCurrency(campaign.cpc)}</TableCell>
                         <TableCell>
                           {campaign.impressions.toLocaleString()}
                         </TableCell>
@@ -1331,8 +1509,19 @@ const HierarchicalCampaignsList = ({
                           {campaign.clicks.toLocaleString()}
                         </TableCell>
                         <TableCell>{campaign.ctr.toFixed(2)}%</TableCell>
-                        <TableCell>{formatCurrency(campaign.cpc)}</TableCell>
-                        <TableCell>{campaign.conversions}</TableCell>
+                        <TableCell>
+                          {campaign.tasa_conversion_porcentaje.toFixed(2)}%
+                        </TableCell>{" "}
+                        {/* ✅ Tasa de Conversión */}
+                        <TableCell>
+                          {Math.round(campaign.conversions)}
+                        </TableCell>
+                        <TableCell>
+                          {campaign.coste_por_conversion.toFixed(2)}€
+                        </TableCell>{" "}
+                        {/* ✅ Coste/Conv */}
+                        <TableCell>{campaign.roas.toFixed(2)}</TableCell>{" "}
+                        {/* ✅ ROAS */}
                         <TableCell
                           className="sticky right-0 border-l-2 border-r-2 border-t-2 border-b-2 text-center px-4 bg-white hover:bg-gray-50 cursor-pointer transition-colors duration-200"
                           style={{
@@ -1431,9 +1620,8 @@ const HierarchicalCampaignsList = ({
         const matchesSearch = ag.assetGroupName
           .toLowerCase()
           .includes(searchTerm.toLowerCase());
-        const matchesStatus =
-          statusFilter === "all" || ag.status === statusFilter;
-        return matchesSearch && matchesStatus;
+
+        return matchesSearch;
       });
 
       const sortedAssetGroups = sortData(filteredAssetGroups);
@@ -1485,21 +1673,6 @@ const HierarchicalCampaignsList = ({
           <Card className="rounded-t-none border-t-0">
             <CardContent className="p-6">
               <div className="flex flex-row gap-3 justify-between items-center mb-6">
-                <FilterPopover
-                  filters={[
-                    {
-                      key: "status",
-                      label: "Estado",
-                      value: statusFilter,
-                      onChange: setStatusFilter,
-                      options: getAvailableStatuses(assetGroups),
-                    },
-                  ]}
-                  onClearAll={() => {
-                    setStatusFilter("all");
-                  }}
-                />
-
                 <div className="relative flex-1 max-w-[200px] sm:max-w-[280px]">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -1535,14 +1708,10 @@ const HierarchicalCampaignsList = ({
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />
                         </div>
 
-                        <div className="flex gap-2 mb-3">
-                          {getStatusBadge(assetGroup.status)}
-                        </div>
-
                         <div className="grid grid-cols-2 gap-3 text-xs">
                           <div>
                             <span className="text-muted-foreground">
-                              Gasto:
+                              Coste:
                             </span>
                             <div className="font-medium">
                               {formatCurrency(assetGroup.cost)}
@@ -1595,7 +1764,7 @@ const HierarchicalCampaignsList = ({
                                 Conversiones
                               </div>
                               <div className="font-medium">
-                                {assetGroup.conversions}
+                                {Math.round(assetGroup.conversions)}
                               </div>
                             </div>
                             <AIIndicator type="adgroup" id={assetGroup.id} />
@@ -1613,11 +1782,8 @@ const HierarchicalCampaignsList = ({
                         <SortableHeader field="assetGroupName">
                           <span className="font-bold">Grupo de Recursos</span>
                         </SortableHeader>
-                        <SortableHeader field="status">
-                          <span className="font-bold">Estado</span>
-                        </SortableHeader>
                         <SortableHeader field="cost">
-                          <span className="font-bold">Gasto</span>
+                          <span className="font-bold">Coste</span>
                         </SortableHeader>
                         <SortableHeader field="impressions">
                           <span className="font-bold">Impresiones</span>
@@ -1641,7 +1807,7 @@ const HierarchicalCampaignsList = ({
                           <span className="font-bold">Engagement</span>
                         </SortableHeader>
                         <TableHead
-                          className="sticky right-0 border-l-2 border-r-2 border-t-2 w-20 text-center px-4 font-bold"
+                          className="sticky right-0 border-l-2 border-r-2 border-t-2 w-20 text-center px-4 font-bold whitespace-nowrap"
                           style={{
                             backgroundColor: "#12BAA9",
                             borderLeftColor: "#12BAA9",
@@ -1652,7 +1818,7 @@ const HierarchicalCampaignsList = ({
                         >
                           IA
                         </TableHead>
-                        <TableHead className="w-8 font-bold"></TableHead>
+                        <TableHead className="w-8 font-bold whitespace-nowrap"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1674,9 +1840,6 @@ const HierarchicalCampaignsList = ({
                             {assetGroup.assetGroupName}
                           </TableCell>
                           <TableCell>
-                            {getStatusBadge(assetGroup.status)}
-                          </TableCell>
-                          <TableCell>
                             {formatCurrency(assetGroup.cost)}
                           </TableCell>
                           <TableCell>
@@ -1686,7 +1849,9 @@ const HierarchicalCampaignsList = ({
                             {assetGroup.clicks.toLocaleString()}
                           </TableCell>
                           <TableCell>{assetGroup.ctr.toFixed(2)}%</TableCell>
-                          <TableCell>{assetGroup.conversions.toFixed(0)}</TableCell>
+                          <TableCell>
+                            {Math.round(assetGroup.conversions)}
+                          </TableCell>
                           <TableCell>
                             {formatCurrency(assetGroup.conversionsValue)}
                           </TableCell>
@@ -1788,9 +1953,7 @@ const HierarchicalCampaignsList = ({
       const matchesSearch = adGroup.name
         .toLowerCase()
         .includes(searchTerm.toLowerCase());
-      const matchesStatus =
-        statusFilter === "all" || adGroup.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      return matchesSearch;
     });
 
     const sortedAdGroups = sortData(filteredAdGroups);
@@ -1841,21 +2004,6 @@ const HierarchicalCampaignsList = ({
         <Card className="rounded-t-none border-t-0">
           <CardContent className="p-6">
             <div className="flex flex-row gap-3 justify-between items-center mb-6">
-              <FilterPopover
-                filters={[
-                  {
-                    key: "status",
-                    label: "Estado",
-                    value: statusFilter,
-                    onChange: setStatusFilter,
-                    options: getAvailableStatuses(adGroups),
-                  },
-                ]}
-                onClearAll={() => {
-                  setStatusFilter("all");
-                }}
-              />
-
               <div className="relative flex-1 max-w-[200px] sm:max-w-[280px]">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -1891,21 +2039,17 @@ const HierarchicalCampaignsList = ({
                         <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                       </div>
 
-                      <div className="flex gap-2 mb-3">
-                        {getStatusBadge(adGroup.status)}
-                      </div>
-
                       <div className="grid grid-cols-2 gap-3 text-xs">
                         <div>
-                          <span className="text-muted-foreground">Puja:</span>
+                          <span className="text-muted-foreground">Coste:</span>
                           <div className="font-medium">
-                            {formatCurrency(adGroup.bid ?? 0)}
+                            {formatCurrency(adGroup.spend)}
                           </div>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">Gasto:</span>
+                          <span className="text-muted-foreground">CPC:</span>
                           <div className="font-medium">
-                            {formatCurrency(adGroup.spend)}
+                            {formatCurrency(adGroup.cpc || 0)}
                           </div>
                         </div>
                         <div>
@@ -1929,23 +2073,38 @@ const HierarchicalCampaignsList = ({
                           </div>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">CPC:</span>
+                          <span className="text-muted-foreground">
+                            Tasa de Conversión:
+                          </span>
                           <div className="font-medium">
-                            {formatCurrency(adGroup.cpc || 0)}
+                            {adGroup.tasa_conversion.toFixed(2)}%
                           </div>
                         </div>
                       </div>
-
+                      <div>
+                        <span className="text-muted-foreground">
+                          Conversiones:
+                        </span>
+                        <div className="font-medium">
+                          {Math.round(adGroup.conversions || 0)}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">
+                          Coste/Conv:
+                        </span>
+                        <div className="font-medium">
+                          {adGroup.coste_por_conversion.toFixed(2)}€
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">ROAS:</span>
+                        <div className="font-medium">
+                          {adGroup.roas.toFixed(2)}
+                        </div>
+                      </div>
                       <div className="mt-3 pt-3 border-t">
                         <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-xs text-muted-foreground">
-                              Conversiones
-                            </div>
-                            <div className="font-medium">
-                              {adGroup.conversions || 0}
-                            </div>
-                          </div>
                           <AIIndicator type="adgroup" id={adGroup.id} />
                         </div>
                       </div>
@@ -1961,14 +2120,11 @@ const HierarchicalCampaignsList = ({
                       <SortableHeader field="name">
                         <span className="font-bold">Grupo de Anuncios</span>
                       </SortableHeader>
-                      <SortableHeader field="status">
-                        <span className="font-bold">Estado</span>
-                      </SortableHeader>
-                      <SortableHeader field="bid">
-                        <span className="font-bold">Puja</span>
-                      </SortableHeader>
                       <SortableHeader field="spend">
-                        <span className="font-bold">Gasto</span>
+                        <span className="font-bold">Coste</span>
+                      </SortableHeader>
+                      <SortableHeader field="cpc">
+                        <span className="font-bold">CPC</span>
                       </SortableHeader>
                       <SortableHeader field="impressions">
                         <span className="font-bold">Impresiones</span>
@@ -1979,11 +2135,17 @@ const HierarchicalCampaignsList = ({
                       <SortableHeader field="ctr">
                         <span className="font-bold">CTR</span>
                       </SortableHeader>
-                      <SortableHeader field="cpc">
-                        <span className="font-bold">CPC</span>
+                      <SortableHeader field="tasa_conversion">
+                        <span className="font-bold">Tasa de Conversión</span>
                       </SortableHeader>
                       <SortableHeader field="conversions">
                         <span className="font-bold">Conversiones</span>
+                      </SortableHeader>
+                      <SortableHeader field="coste_por_conversion">
+                        <span className="font-bold">Coste/Conv</span>
+                      </SortableHeader>
+                      <SortableHeader field="roas">
+                        <span className="font-bold">ROAS</span>
                       </SortableHeader>
                       <TableHead
                         className="sticky right-0 border-l-2 border-r-2 border-t-2 w-20 text-center px-4 font-bold"
@@ -1997,7 +2159,7 @@ const HierarchicalCampaignsList = ({
                       >
                         IA
                       </TableHead>
-                      <TableHead className="w-8 font-bold"></TableHead>
+                      <TableHead className="w-8 font-bold whitespace-nowrap"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -2018,20 +2180,26 @@ const HierarchicalCampaignsList = ({
                         <TableCell className="font-medium">
                           {adGroup.name}
                         </TableCell>
-                        <TableCell>{getStatusBadge(adGroup.status)}</TableCell>
-                        <TableCell>
-                          {formatCurrency(adGroup.bid ?? 0)}
-                        </TableCell>
                         <TableCell>{formatCurrency(adGroup.spend)}</TableCell>
+                        <TableCell>
+                          {formatCurrency(adGroup.cpc || 0)}
+                        </TableCell>
                         <TableCell>
                           {adGroup.impressions.toLocaleString()}
                         </TableCell>
                         <TableCell>{adGroup.clicks.toLocaleString()}</TableCell>
-                        <TableCell>{(adGroup.ctr || 0).toFixed(1)}%</TableCell>
+                        <TableCell>{(adGroup.ctr || 0).toFixed(2)}%</TableCell>
                         <TableCell>
-                          {formatCurrency(adGroup.cpc || 0)}
+                          {(adGroup.tasa_conversion || 0).toFixed(2)}%
                         </TableCell>
-                        <TableCell>{adGroup.conversions || 0}</TableCell>
+                        <TableCell>
+                          {Math.round(adGroup.conversions || 0)}
+                        </TableCell>
+                        <TableCell>
+                          {formatCurrency(adGroup.coste_por_conversion || 0)}
+                        </TableCell>
+                        <TableCell>{(adGroup.roas || 0).toFixed(2)}</TableCell>
+
                         <TableCell
                           className="sticky right-0 border-l-2 border-r-2 border-t-2 border-b-2 text-center px-4 bg-white hover:bg-gray-50 cursor-pointer transition-colors duration-200"
                           style={{
@@ -2205,22 +2373,48 @@ const HierarchicalCampaignsList = ({
                         <div className="mb-3">
                           {getFieldTypeBadge(asset.fieldType)}
                           {asset.textValue && (
-                            <div className="text-sm font-medium text-blue-600 mt-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAsset(asset);
+                                setIsAssetModalOpen(true);
+                              }}
+                              className="text-sm font-medium text-blue-600 hover:underline mt-2 block text-left"
+                            >
                               {asset.textValue}
-                            </div>
+                            </button>
+                          )}
+                          {asset.youtubeLink && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAsset(asset);
+                                setIsAssetModalOpen(true);
+                              }}
+                              className="flex items-center gap-1 text-sm text-blue-600 hover:underline mt-2"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Ver vídeo de YouTube
+                            </button>
                           )}
                           {asset.imageUrl && (
-                            <div className="text-sm text-muted-foreground mt-2">
-                              <ExternalLink className="h-3 w-3 inline mr-1" />
-                              Imagen
-                            </div>
+                            <a
+                              href={asset.imageUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-sm text-blue-600 hover:underline mt-2 flex items-center gap-1"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Ver imagen
+                            </a>
                           )}
                         </div>
 
                         <div className="flex gap-2 mb-3 items-center justify-between">
-                          <div className="flex gap-2">
-                            {getPerformanceLabelBadge(asset.performanceLabel)}
-                          </div>
+                          {getPerformanceLabelBadge(
+                            calculatePerformanceLabel(asset)
+                          )}
                           <AIIndicator type="ad" id={asset.id} />
                         </div>
 
@@ -2243,7 +2437,7 @@ const HierarchicalCampaignsList = ({
                           </div>
                           <div>
                             <span className="text-muted-foreground">
-                              Gasto:
+                              Coste:
                             </span>
                             <div className="font-medium">
                               {formatCurrency(asset.cost)}
@@ -2254,7 +2448,7 @@ const HierarchicalCampaignsList = ({
                               Conversiones:
                             </span>
                             <div className="font-medium">
-                              {asset.conversions}
+                              {Math.round(asset.conversions)}
                             </div>
                           </div>
                         </div>
@@ -2283,7 +2477,7 @@ const HierarchicalCampaignsList = ({
                           <span className="font-bold">Clics</span>
                         </SortableHeader>
                         <SortableHeader field="cost">
-                          <span className="font-bold">Gasto</span>
+                          <span className="font-bold">Coste</span>
                         </SortableHeader>
                         <SortableHeader field="conversions">
                           <span className="font-bold">Conversiones</span>
@@ -2310,32 +2504,59 @@ const HierarchicalCampaignsList = ({
                           </TableCell>
                           <TableCell className="max-w-xs">
                             {asset.textValue ? (
-                              <span className="font-medium text-blue-600 truncate block">
-                                {asset.textValue}
-                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedAsset(asset);
+                                  setIsAssetModalOpen(true);
+                                }}
+                                className="font-medium text-blue-600 hover:underline text-left truncate block w-full"
+                              >
+                                <span className="block truncate max-w-[280px]">
+                                  {asset.textValue}
+                                </span>
+                              </button>
+                            ) : asset.youtubeLink ? (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedAsset(asset);
+                                  setIsAssetModalOpen(true);
+                                }}
+                                className="flex items-center gap-1 text-blue-600 hover:underline"
+                              >
+                                <ExternalLink className="h-3 w-3 shrink-0" />
+                                <span className="truncate">
+                                  Ver vídeo de YouTube
+                                </span>
+                              </button>
                             ) : asset.imageUrl ? (
                               <a
                                 href={asset.imageUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
                                 className="flex items-center gap-1 text-blue-600 hover:underline"
                               >
-                                <ExternalLink className="h-3 w-3" />
-                                Ver imagen
+                                <ExternalLink className="h-3 w-3 shrink-0" />
+                                <span className="truncate">Ver imagen</span>
                               </a>
                             ) : (
                               <span className="text-muted-foreground">-</span>
                             )}
                           </TableCell>
+
                           <TableCell>
-                            {getPerformanceLabelBadge(asset.performanceLabel)}
+                            {getPerformanceLabelBadge(
+                              calculatePerformanceLabel(asset)
+                            )}
                           </TableCell>
                           <TableCell>
                             {asset.impressions.toLocaleString()}
                           </TableCell>
                           <TableCell>{asset.clicks.toLocaleString()}</TableCell>
                           <TableCell>{formatCurrency(asset.cost)}</TableCell>
-                          <TableCell>{asset.conversions}</TableCell>
+                          <TableCell>{Math.round(asset.conversions)}</TableCell>
                           <TableCell
                             className="sticky right-0 border-l-2 border-r-2 border-t-2 border-b-2 text-center px-4 bg-white hover:bg-gray-50 cursor-pointer transition-colors duration-200"
                             style={{
@@ -2375,6 +2596,14 @@ const HierarchicalCampaignsList = ({
               />
             </CardContent>
           </Card>
+          <AssetPreviewModal
+            asset={selectedAsset}
+            isOpen={isAssetModalOpen}
+            onClose={() => {
+              setIsAssetModalOpen(false);
+              setSelectedAsset(null);
+            }}
+          />
         </div>
       );
     }
@@ -2404,9 +2633,8 @@ const HierarchicalCampaignsList = ({
         ad.headline1.toLowerCase().includes(searchTerm.toLowerCase()) ||
         ad.headline2.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (ad.name && ad.name.toLowerCase().includes(searchTerm.toLowerCase()));
-      const matchesStatus =
-        statusFilter === "all" || ad.status === statusFilter;
-      return matchesSearch && matchesStatus;
+
+      return matchesSearch;
     });
 
     const sortedAds = sortData(filteredAds);
@@ -2478,21 +2706,6 @@ const HierarchicalCampaignsList = ({
         <Card className="rounded-t-none border-t-0">
           <CardContent className="p-6">
             <div className="flex flex-row gap-3 justify-between items-center mb-6">
-              <FilterPopover
-                filters={[
-                  {
-                    key: "status",
-                    label: "Estado",
-                    value: statusFilter,
-                    onChange: setStatusFilter,
-                    options: getAvailableStatuses(ads),
-                  },
-                ]}
-                onClearAll={() => {
-                  setStatusFilter("all");
-                }}
-              />
-
               <div className="relative flex-1 max-w-[200px] sm:max-w-[280px]">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -2528,9 +2741,6 @@ const HierarchicalCampaignsList = ({
                       </div>
 
                       <div className="flex gap-2 mb-3 items-center justify-between">
-                        <div className="flex gap-2">
-                          {getStatusBadge(ad.status)}
-                        </div>
                         <AIIndicator type="ad" id={ad.id} />
                       </div>
 
@@ -2566,7 +2776,7 @@ const HierarchicalCampaignsList = ({
                             Conversiones:
                           </span>
                           <div className="font-medium">
-                            {ad.conversions || 0}
+                            {Math.round(ad.conversions || 0)}
                           </div>
                         </div>
                         <div>
@@ -2597,12 +2807,9 @@ const HierarchicalCampaignsList = ({
                 <Table className="min-w-full table-auto">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[300px] font-bold">
+                      <TableHead className="w-[300px] font-bold whitespace-nowrap">
                         Anuncio
                       </TableHead>
-                      <SortableHeader field="status">
-                        <span className="font-bold">Estado</span>
-                      </SortableHeader>
                       <SortableHeader field="impressions">
                         <span className="font-bold">Impresiones</span>
                       </SortableHeader>
@@ -2630,7 +2837,7 @@ const HierarchicalCampaignsList = ({
                       >
                         IA
                       </TableHead>
-                      <TableHead className="w-16 font-bold">
+                      <TableHead className="w-16 font-bold whitespace-nowrap">
                         URL Final
                       </TableHead>
                     </TableRow>
@@ -2664,12 +2871,11 @@ const HierarchicalCampaignsList = ({
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>{getStatusBadge(ad.status)}</TableCell>
                         <TableCell>{ad.impressions.toLocaleString()}</TableCell>
                         <TableCell>{ad.clicks.toLocaleString()}</TableCell>
                         <TableCell>{(ad.ctr || 0).toFixed(1)}%</TableCell>
                         <TableCell>{formatCurrency(ad.cpc || 0)}</TableCell>
-                        <TableCell>{ad.conversions || 0}</TableCell>
+                        <TableCell>{Math.round(ad.conversions || 0)}</TableCell>
                         <TableCell
                           className="sticky right-0 border-l-2 border-r-2 border-t-2 border-b-2 text-center px-4 bg-white hover:bg-gray-50 cursor-pointer transition-colors duration-200"
                           style={{

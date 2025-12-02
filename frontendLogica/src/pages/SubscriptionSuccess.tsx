@@ -7,7 +7,7 @@ const SubscriptionSuccess = () => {
   useEffect(() => {
     const refreshSession = async () => {
       try {
-        const res = await fetch('https://pwi.es/api/auth/refresh-session', {
+        const res = await fetch('https://optimizalo.app/api/auth/refresh-session', {
           method: 'GET',
           credentials: 'include'
         });

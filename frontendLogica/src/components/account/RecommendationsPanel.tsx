@@ -1,31 +1,39 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Recomendacion } from "@/types";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FilterPopover } from "@/components/ui/filter-popover";
-import { fetchRecomendaciones } from "@/services/api";
-import { applyRecommendation } from '@/services/api';
-import { fetchAppliedRecommendations } from "@/services/api";
-
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { fetchRecomendaciones, applyRecommendation } from "@/services/api";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { 
-  Pagination, 
-  PaginationContent, 
-  PaginationItem, 
-  PaginationLink, 
-  PaginationNext, 
-  PaginationPrevious 
-} from "@/components/ui/pagination";
-import { AlertTriangle, TrendingUp, Lightbulb, Eye, CheckCircle, Loader2, RefreshCw } from "lucide-react";
+  AlertTriangle, 
+  TrendingUp, 
+  Lightbulb, 
+  Eye, 
+  CheckCircle, 
+  Loader2,
+  Megaphone,
+  Users,
+  Layers,
+  FileText,
+  Image,
+  Key,
+  PieChart,
+  Search
+} from "lucide-react";
+import { NavigationState } from "@/pages/AccountDetailPage";
+import AppliedRecommendationsHistory from "./AppliedRecommendationsHistory";
 
 interface RecommendationsProps {
   accountId: string;
-  navigation: {
-    level: 'campaigns' | 'adgroups' | 'ads';
-    selectedCampaign?: string;
-    selectedAdGroup?: string;
-  };
+  navigation: NavigationState;
+  onNavigationChange?: (navigation: NavigationState) => void;
   specificFilter?: {
     type: 'campaign' | 'adgroup' | 'ad';
     id: string;
@@ -33,25 +41,12 @@ interface RecommendationsProps {
   } | null;
 }
 
-type Priority = "alta" | "media" | "baja";
-type Category = "pujas" | "anuncios" | "keywords" | "landing_pages" | "segmentacion" | "presupuesto" | "search_terms";
+type FunctionalGroup = "campaigns" | "adgroups" | "assetGroups" | "ads" | "assets" | "keywords" | "segments" | "searchTerms";
 
-interface AppliedRecommendation extends Recomendacion {
-  appliedDate: string;
-  result: {
-    status: "improved" | "no_change" | "worsened";
-    actualImprovement: string;
-    comparisonPeriod: string;
-    kpiVariation: number;
-  };
-}
+const ITEMS_PER_PAGE = 5;
 
-const RecommendationsPanel = ({ accountId, navigation, specificFilter }: RecommendationsProps) => {
+const RecommendationsPanel = ({ accountId, navigation, onNavigationChange, specificFilter }: RecommendationsProps) => {
   const [mainTab, setMainTab] = useState<string>("pending");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [priorityFilter, setPriorityFilter] = useState<string>("all");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [appliedRecommendations, setAppliedRecommendations] = useState<AppliedRecommendation[]>([]);
   const [selectedRecommendation, setSelectedRecommendation] = useState<Recomendacion | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [applyingIds, setApplyingIds] = useState<Set<number>>(new Set());
@@ -59,53 +54,44 @@ const RecommendationsPanel = ({ accountId, navigation, specificFilter }: Recomme
   const [allRecommendations, setAllRecommendations] = useState<Recomendacion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastFetch, setLastFetch] = useState<Date | null>(null);
 
-  const [isLoadingApplied, setIsLoadingApplied] = React.useState(false);
-  const [errorApplied, setErrorApplied] = React.useState<string | null>(null);
+  // Estados de paginación para cada grupo funcional
+  const [paginationState, setPaginationState] = useState<Record<FunctionalGroup, number>>({
+    campaigns: 1,
+    adgroups: 1,
+    assetGroups: 1,
+    ads: 1,
+    assets: 1,
+    keywords: 1,
+    segments: 1,
+    searchTerms: 1,
+  });
 
-  const itemsPerPage = 5;
-
-const fetchRecommendations = useCallback(async () => {
-  try {
-    setIsLoading(true);
-    setError(null);
-
-    const data = await fetchRecomendaciones(Number(accountId));
-
-    setAllRecommendations(data);
-    setLastFetch(new Date());
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : 'Error al cargar recomendaciones';
-    setError(errorMessage);
-    console.error('Error fetching recommendations:', err);
-  } finally {
-    setIsLoading(false);
-  }
-}, [accountId]);
-
- const fetchApplied = useCallback(async () => {
-  try {
-    setIsLoadingApplied(true);
-    setErrorApplied(null);
-    const data = await fetchAppliedRecommendations(Number(accountId));
-    const appliedData: AppliedRecommendation[] = data.map(rec => ({
-      ...rec,
-      appliedDate: rec.fecha_aplicacion ?? new Date().toISOString(),
-      result: {
-        actualImprovement: 'N/A', 
-        status: 'no_change',      
-        comparisonPeriod: 'last_30_days', 
-        kpiVariation: 0,
-      }
+  // Función para actualizar la página de un grupo específico
+  const setPageForGroup = (group: FunctionalGroup, page: number) => {
+    setPaginationState(prev => ({
+      ...prev,
+      [group]: page
     }));
-    setAppliedRecommendations(appliedData);
-  } catch (err) {
-    setErrorApplied(err instanceof Error ? err.message : 'Error al cargar recomendaciones aplicadas');
-  } finally {
-    setIsLoadingApplied(false);
-  }
-}, [accountId]); 
+  };
+
+  // Fetch recommendations from API
+  const fetchRecommendations = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const data = await fetchRecomendaciones(Number(accountId));
+
+      setAllRecommendations(data);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Error al cargar recomendaciones';
+      setError(errorMessage);
+      console.error('Error fetching recommendations:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [accountId]);
 
   useEffect(() => {
     if (accountId) {
@@ -113,94 +99,91 @@ const fetchRecommendations = useCallback(async () => {
     }
   }, [accountId, fetchRecommendations]);
 
-  useEffect(() => {
-    if (accountId) {
-      fetchApplied();
-    }
-  }, [accountId, fetchApplied]);
+  const getFilteredRecommendations = useMemo(() => {
+    let filtered = allRecommendations;
 
-  const handleRefresh = () => {
-    fetchRecommendations();
-  };
-
-const getFilteredRecommendations = useMemo(() => {
-  console.log("Navigation state:", navigation);
-  console.log("Specific filter:", specificFilter);
-  console.log("All recommendations:", allRecommendations.length);
-  
-  return allRecommendations.filter(rec => {
-    // Si hay un filtro específico, aplicarlo primero
     if (specificFilter) {
-      const matchesType = rec.tipo_objeto === specificFilter.type || 
-                         (specificFilter.type === 'adgroup' && rec.tipo_objeto === 'ad_group');
-      const matchesId = rec.objeto_id?.toString() === specificFilter.id;
-      
-      return matchesType && matchesId;
+      filtered = filtered.filter(rec => {
+        const recType = rec.tipo_objeto === 'ad_group' ? 'adgroup' : rec.tipo_objeto;
+        const filterType = specificFilter.type;
+        
+        const typeMatches = recType === filterType;
+        const idMatches = rec.objeto_id?.toString() === specificFilter.id;
+        
+        return typeMatches && idMatches;
+      });
+      return filtered;
     }
-    
-    // Si no hay filtro específico, usar la navegación normal
+
     if (navigation.level === 'campaigns') {
-      return true;
+      return filtered;
     }
     
     if (navigation.level === 'adgroups' && navigation.selectedCampaign) {
-      const isCampaignRec = rec.tipo_objeto === 'campaign' && 
-                           rec.objeto_id?.toString() === navigation.selectedCampaign;
+      filtered = filtered.filter(rec => {
+        if (rec.tipo_objeto === 'campaign' && 
+            rec.objeto_id?.toString() === navigation.selectedCampaign) {
+          return true;
+        }
+        
+        if (rec.tipo_objeto === 'ad_group') {
+          return true;
+        }
+        
+        if (rec.tipo_objeto === 'asset_group') {
+          return true;
+        }
+        
+        return false;
+      });
       
-      const isAdGroupRec = rec.tipo_objeto === 'ad_group';
-      
-      return isCampaignRec || isAdGroupRec;
+      return filtered;
     }
     
     if (navigation.level === 'ads' && navigation.selectedAdGroup) {
-      const isAdGroupRec = rec.tipo_objeto === 'ad_group' && 
-                          rec.objeto_id?.toString() === navigation.selectedAdGroup;
+      filtered = filtered.filter(rec => {
+        if (rec.tipo_objeto === 'ad_group' && 
+            rec.objeto_id?.toString() === navigation.selectedAdGroup) {
+          return true;
+        }
+        
+        if (rec.tipo_objeto === 'asset_group' && 
+            rec.objeto_id?.toString() === navigation.selectedAdGroup) {
+          return true;
+        }
+        
+        if (rec.tipo_objeto === 'ad') {
+          return true;
+        }
+        
+        if (rec.tipo_objeto === 'asset') {
+          return true;
+        }
+        
+        return false;
+      });
       
-      const isAdRec = rec.tipo_objeto === 'ad';
-      
-      return isAdGroupRec || isAdRec;
+      return filtered;
     }
     
-    return true;
-  });
-}, [allRecommendations, navigation, specificFilter]);
+    return filtered;
+  }, [allRecommendations, navigation, specificFilter]);
 
-const getFilteredAppliedRecommendations = useMemo(() => {
-  return appliedRecommendations.filter(rec => {
-    if (navigation.level === 'campaigns') {
-      return true;
-    }
-    
-    if (navigation.level === 'adgroups' && navigation.selectedCampaign) {
-      const isCampaignRec = rec.tipo_objeto === 'campaign' && 
-                           rec.objeto_id?.toString() === navigation.selectedCampaign;
-      const isAdGroupRec = rec.tipo_objeto === 'ad_group';
-      return isCampaignRec || isAdGroupRec;
-    }
-    
-    if (navigation.level === 'ads' && navigation.selectedAdGroup) {
-      const isAdGroupRec = rec.tipo_objeto === 'ad_group' && 
-                          rec.objeto_id?.toString() === navigation.selectedAdGroup;
-      const isAdRec = rec.tipo_objeto === 'ad';
-      return isAdGroupRec || isAdRec;
-    }
-    
-    return true;
-  });
-}, [appliedRecommendations, navigation]);
-
-  const availableCategories = useMemo(() => {
-    const categories = new Set(getFilteredRecommendations.map(rec => rec.categoria));
-    return Array.from(categories).sort();
-  }, [getFilteredRecommendations]);
-
-  const availablePriorities = useMemo(() => {
-    const priorities = new Set(getFilteredRecommendations.map(rec => rec.prioridad));
-    return Array.from(priorities).sort((a, b) => {
-      const order: Record<string, number> = { alta: 1, media: 2, baja: 3 };
-      return (order[a] || 99) - (order[b] || 99);
-    });
-  }, [getFilteredRecommendations]);
+  const getCategoryToFunctionalGroup = (category: string): FunctionalGroup => {
+    const mapping: Record<string, FunctionalGroup> = {
+      'pujas': 'campaigns',
+      'anuncios': 'ads',
+      'keywords': 'keywords',
+      'landing_pages': 'campaigns',
+      'segmentacion': 'segments',
+      'presupuesto': 'campaigns',
+      'search_terms': 'searchTerms',
+      'estrategia': 'campaigns',
+      'estructura': 'assetGroups',
+      'testing': 'assets',
+    };
+    return mapping[category] || 'campaigns';
+  };
 
   const getPriorityIcon = (priority: string) => {
     switch (priority) {
@@ -209,7 +192,7 @@ const getFilteredAppliedRecommendations = useMemo(() => {
       case "media":
         return <TrendingUp className="h-4 w-4 text-yellow-500" />;
       case "baja":
-        return <Lightbulb className="h-4 w-4" style={{ color: '#12BAA9' }} />;
+        return <Lightbulb className="h-4 w-4 text-blue-500" />;
       default:
         return <Lightbulb className="h-4 w-4 text-gray-500" />;
     }
@@ -222,9 +205,29 @@ const getFilteredAppliedRecommendations = useMemo(() => {
       case "media":
         return "bg-yellow-100 text-yellow-800 border-yellow-200";
       case "baja":
-        return "text-white border-[#12BAA9]" + " bg-[#12BAA9]";
+        return "bg-blue-100 text-blue-800 border-blue-200";
       default:
         return "bg-gray-100 text-gray-800 border-gray-200";
+    }
+  };
+
+  const getEntityTypeLabel = (type: string) => {
+    switch (type) {
+      case "campaign":
+        return "Campaña";
+      case "ad_group":
+      case "adgroup":
+        return "Conjunto";
+      case "asset_group":
+        return "Grupo de recursos";
+      case "ad":
+        return "Anuncio";
+      case "asset":
+        return "Recurso";
+      case "keyword":
+        return "Palabra clave";
+      default:
+        return type;
     }
   };
 
@@ -249,21 +252,32 @@ const getFilteredAppliedRecommendations = useMemo(() => {
     }
   };
 
-  const filterRecommendations = () => {
-    let filtered = getFilteredRecommendations;
-    
-    if (categoryFilter !== "all") {
-      filtered = filtered.filter(rec => rec.categoria === categoryFilter);
-    }
-    
-    if (priorityFilter !== "all") {
-      filtered = filtered.filter(rec => rec.prioridad === priorityFilter);
-    }
-    
-    return filtered.sort((a, b) => {
-      const priorityOrder: Record<string, number> = { alta: 3, media: 2, baja: 1 };
-      return (priorityOrder[b.prioridad] || 0) - (priorityOrder[a.prioridad] || 0);
-    });
+  const getFunctionalGroupLabel = (group: FunctionalGroup) => {
+    const labels: Record<FunctionalGroup, string> = {
+      campaigns: "Campañas",
+      adgroups: "Grupos de anuncios",
+      assetGroups: "Grupos de recursos",
+      ads: "Anuncios",
+      assets: "Recursos",
+      keywords: "Keywords",
+      segments: "Segmentos",
+      searchTerms: "Términos de búsqueda"
+    };
+    return labels[group];
+  };
+
+  const getFunctionalGroupIcon = (group: FunctionalGroup) => {
+    const icons: Record<FunctionalGroup, React.ReactNode> = {
+      campaigns: <Megaphone className="h-5 w-5" />,
+      adgroups: <Users className="h-5 w-5" />,
+      assetGroups: <Layers className="h-5 w-5" />,
+      ads: <FileText className="h-5 w-5" />,
+      assets: <Image className="h-5 w-5" />,
+      keywords: <Key className="h-5 w-5" />,
+      segments: <PieChart className="h-5 w-5" />,
+      searchTerms: <Search className="h-5 w-5" />
+    };
+    return icons[group];
   };
 
   const handleApplyRecommendation = async (recommendation: Recomendacion) => {
@@ -279,22 +293,11 @@ const getFilteredAppliedRecommendations = useMemo(() => {
         variacion_kpi: 12.3
       });
 
-      const appliedRec: AppliedRecommendation = {
-        ...recommendation,
-        appliedDate: new Date().toISOString(),
-        result: {
-          status: "improved",
-          actualImprovement: recommendation.impacto_estimado,
-          comparisonPeriod: "7 días",
-          kpiVariation: 12.3
-        }
-      };
-
-      setAppliedRecommendations(prev => [appliedRec, ...prev]);
-      
       setAllRecommendations(prev => 
         prev.filter(r => r.id !== recommendationId)
       );
+
+      alert('Recomendación aplicada con éxito');
 
     } catch (err) {
       console.error('Error applying recommendation:', err);
@@ -314,22 +317,18 @@ const getFilteredAppliedRecommendations = useMemo(() => {
   };
 
   const renderError = () => (
-    <div className="text-center py-8">
-      <AlertTriangle className="h-12 w-12 mx-auto mb-3 text-red-400" />
+    <div className="text-center py-12">
+      <AlertTriangle className="h-16 w-16 mx-auto mb-4 text-red-400" />
       <p className="text-red-600 font-medium mb-2">Error al cargar recomendaciones</p>
-      <p className="text-gray-600 text-sm mb-4">{error}</p>
-      <Button onClick={handleRefresh} variant="outline" size="sm">
-        <RefreshCw className="h-4 w-4 mr-2" />
-        Reintentar
-      </Button>
+      <p className="text-muted-foreground text-sm mb-4">{error}</p>
     </div>
   );
 
   const renderLoading = () => (
-    <div className="text-center py-8">
-      <Loader2 className="h-12 w-12 mx-auto mb-3 animate-spin" style={{ color: '#12BAA9' }} />
-      <p className="text-gray-600">Cargando recomendaciones...</p>
-      <p className="text-sm text-gray-400 mt-1">Analizando tu cuenta con IA</p>
+    <div className="text-center py-12">
+      <Loader2 className="h-16 w-16 mx-auto mb-4 text-primary animate-spin" />
+      <p className="text-muted-foreground font-medium">Cargando recomendaciones...</p>
+      <p className="text-sm text-muted-foreground/70 mt-1">Analizando tu cuenta con IA</p>
     </div>
   );
 
@@ -378,7 +377,7 @@ const getFilteredAppliedRecommendations = useMemo(() => {
             {selectedRecommendation.tipo_objeto && (
               <div>
                 <h3 className="font-medium mb-1">Tipo de objeto</h3>
-                <p className="text-gray-600">{selectedRecommendation.tipo_objeto}</p>
+                <p className="text-gray-600">{getEntityTypeLabel(selectedRecommendation.tipo_objeto)}</p>
               </div>
             )}
 
@@ -417,8 +416,6 @@ const getFilteredAppliedRecommendations = useMemo(() => {
                 setIsModalOpen(false);
               }}
               disabled={selectedRecommendation.estado === 'aplicada'}
-              style={{ backgroundColor: '#12BAA9', borderColor: '#12BAA9' }}
-              className="text-white hover:opacity-90"
             >
               {selectedRecommendation.estado === 'aplicada' ? 'Ya aplicada' : 'Aplicar recomendación'}
             </Button>
@@ -428,209 +425,158 @@ const getFilteredAppliedRecommendations = useMemo(() => {
     );
   };
 
-  const AppliedRecommendationsHistory = ({ recommendations }: { recommendations: AppliedRecommendation[] }) => {
-    if (isLoadingApplied) {
-      return (
-        <div className="text-center py-8">
-          <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin" style={{ color: '#12BAA9' }} />
-          <p className="text-gray-600">Cargando historial...</p>
-        </div>
-      );
-    }
-
-    if (errorApplied) {
-      return (
-        <div className="text-center py-8">
-          <AlertTriangle className="h-8 w-8 mx-auto mb-3 text-red-400" />
-          <p className="text-red-600 font-medium mb-2">Error al cargar historial</p>
-          <p className="text-gray-600 text-sm">{errorApplied}</p>
-        </div>
-      );
-    }
-
-    if (recommendations.length === 0) {
-      return (
-        <div className="text-center py-8">
-          <CheckCircle className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-          <p className="text-gray-600">No hay recomendaciones aplicadas</p>
-          <p className="text-sm text-gray-400">Las recomendaciones aplicadas aparecerán aquí</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-4">
-        {recommendations.map((rec) => (
-          <div key={rec.id} className="bg-gray-50 border rounded-lg p-4">
-            <div className="flex items-start justify-between mb-2">
-              <h4 className="font-semibold text-gray-900">{rec.titulo}</h4>
-              <Badge variant="outline" className="text-xs">
-                {rec.fecha_aplicacion ? 
-                  new Date(rec.fecha_aplicacion).toLocaleDateString() : 
-                  new Date(rec.appliedDate).toLocaleDateString()
-                }
-              </Badge>
-            </div>
-            <p className="text-sm text-gray-600 mb-2">{rec.descripcion}</p>
-            <div className="flex items-center gap-2">
-              <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs">
-                {rec.result.actualImprovement}
-              </Badge>
-              <span className="text-xs text-gray-500">
-                Estado: {rec.result.status === 'improved' ? 'Mejorado' : 
-                        rec.result.status === 'no_change' ? 'Sin cambios' : 'Empeorado'}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
   const renderRecommendationsList = () => {
     if (isLoading) return renderLoading();
     if (error) return renderError();
 
-    const recommendations = filterRecommendations();
-    const totalPages = Math.ceil(recommendations.length / itemsPerPage);
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const currentItems = recommendations.slice(startIndex, startIndex + itemsPerPage);
+    const recommendations = getFilteredRecommendations;
 
     if (recommendations.length === 0) {
       return (
-        <div className="text-center py-8">
-          <div className="text-muted-foreground mb-4">
-            <CheckCircle className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-            <p>No hay recomendaciones para mostrar</p>
-            <p className="text-sm">Las recomendaciones aparecerán según los filtros seleccionados</p>
-          </div>
+        <div className="text-center py-12">
+          <CheckCircle className="h-16 w-16 mx-auto mb-4 text-muted-foreground/30" />
+          <p className="text-muted-foreground font-medium">No hay recomendaciones para mostrar</p>
+          <p className="text-sm text-muted-foreground/70 mt-1">Prueba a ajustar los filtros</p>
         </div>
       );
     }
 
-    return (
-      <div className="space-y-4">
-        <div className="space-y-2">
-          {currentItems.map((rec) => {
-            const recommendationId = rec.id;
-            const isApplying = applyingIds.has(recommendationId);
-            const isApplied = rec.estado === 'aplicada' || appliedRecommendations.some(applied => 
-              applied.id === recommendationId
-            );
-            
-            return (
-              <div key={rec.id} className="bg-white border rounded-lg p-4 hover:shadow-md transition-all duration-200">
-                <div className="flex flex-col lg:flex-row lg:items-start gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <h4 className="font-semibold text-gray-900">{rec.titulo}</h4>
-                      <Badge variant="outline" className="text-xs shrink-0">
-                        {getCategoryLabel(rec.categoria)}
-                      </Badge>
-                      <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs hover:bg-emerald-100">
-                        {rec.impacto_estimado}
-                      </Badge>
-                      <div className="flex items-center gap-1">
-                        {getPriorityIcon(rec.prioridad)}
-                        <Badge variant="outline" className={`text-xs ${getPriorityColor(rec.prioridad)}`}>
-                          {rec.prioridad.charAt(0).toUpperCase() + rec.prioridad.slice(1)}
-                        </Badge>
-                      </div>
-                    </div>
-                    <p className="text-sm text-gray-600 mb-3">{rec.descripcion}</p>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-2 shrink-0 w-full lg:w-auto">
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleViewDetail(rec)}
-                      className="text-xs w-full sm:w-auto"
-                      disabled={isApplying}
-                    >
-                      <Eye className="h-3 w-3 mr-1" />
-                      Ver detalle
-                    </Button>
-                    <Button 
-                      size="sm"
-                      onClick={() => handleApplyRecommendation(rec)}
-                      className="text-xs w-full sm:w-auto text-white hover:opacity-90"
-                      style={{ backgroundColor: '#12BAA9', borderColor: '#12BAA9' }}
-                      disabled={isApplying || isApplied}
-                    >
-                      {isApplying ? (
-                        <>
-                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                          Aplicando...
-                        </>
-                      ) : isApplied ? (
-                        <>
-                          <CheckCircle className="h-3 w-3 mr-1" />
-                          Aplicado
-                        </>
-                      ) : (
-                        "Aplicar"
-                      )}
-                    </Button>
-                  </div>
+    // Agrupar por grupo funcional
+    const groupedRecommendations = recommendations.reduce((acc, rec) => {
+      const functionalGroup = getCategoryToFunctionalGroup(rec.categoria);
+      if (!acc[functionalGroup]) {
+        acc[functionalGroup] = [];
+      }
+      acc[functionalGroup].push(rec);
+      return acc;
+    }, {} as Record<FunctionalGroup, Recomendacion[]>);
+
+    const renderRecommendationCard = (rec: Recomendacion) => {
+      const isApplying = applyingIds.has(rec.id);
+      const isApplied = rec.estado === 'aplicada';
+      
+      return (
+        <div key={rec.id} className="flex items-start gap-3 p-4 rounded-lg border bg-card hover:bg-accent/5 transition-colors">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <h4 className="font-semibold text-sm mb-1">{rec.titulo}</h4>
+                <p className="text-xs text-muted-foreground mb-2">{rec.descripcion}</p>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline" className="text-xs">
+                    {getEntityTypeLabel(rec.tipo_objeto)}
+                  </Badge>
+                  <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50 text-xs">
+                    {rec.impacto_estimado}
+                  </Badge>
                 </div>
               </div>
-            );
-          })}
+              
+              <div className="flex gap-2 shrink-0">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => handleViewDetail(rec)}
+                  disabled={isApplying}
+                  className="h-8 w-8 p-0"
+                >
+                  <Eye className="h-4 w-4" />
+                </Button>
+                <Button 
+                  size="sm"
+                  onClick={() => handleApplyRecommendation(rec)}
+                  disabled={isApplying || isApplied}
+                  className="text-xs"
+                >
+                  {isApplying ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : isApplied ? (
+                    <CheckCircle className="h-3.5 w-3.5" />
+                  ) : (
+                    "Aplicar"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
+      );
+    };
 
-        {totalPages > 1 && (
-          <Pagination className="justify-center">
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious 
-                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                  className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                />
-              </PaginationItem>
-              {[...Array(totalPages)].map((_, i) => (
-                <PaginationItem key={i}>
-                  <PaginationLink 
-                    onClick={() => setCurrentPage(i + 1)}
-                    isActive={currentPage === i + 1}
-                    className="cursor-pointer"
-                    style={currentPage === i + 1 ? { backgroundColor: '#12BAA9', borderColor: '#12BAA9', color: 'white' } : {}}
-                  >
-                    {i + 1}
-                  </PaginationLink>
-                </PaginationItem>
-              ))}
-              <PaginationItem>
-                <PaginationNext 
-                  onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                  className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
-        )}
+    const renderFunctionalGroupBlock = (
+      group: FunctionalGroup,
+      recs: Recomendacion[]
+    ) => {
+      if (recs.length === 0) return null;
+
+      const currentPage = paginationState[group];
+      const totalPages = Math.ceil(recs.length / ITEMS_PER_PAGE);
+      const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+      const paginatedRecs = recs.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+      
+      return (
+        <AccordionItem value={group} className="border rounded-lg">
+          <AccordionTrigger className="px-4 py-3 hover:no-underline">
+            <div className="flex items-center justify-between w-full pr-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary/10 text-primary">
+                  {getFunctionalGroupIcon(group)}
+                </div>
+                <div className="text-left">
+                  <h3 className="font-semibold text-base">{getFunctionalGroupLabel(group)}</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {recs.length} recomendación{recs.length !== 1 ? 'es' : ''}
+                  </p>
+                </div>
+              </div>
+              <Badge className="bg-primary/10 text-primary mr-2">
+                {recs.length}
+              </Badge>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="px-4 pb-4">
+            <div className="space-y-3 mb-4">
+              {paginatedRecs.map(renderRecommendationCard)}
+            </div>
+            {totalPages > 1 && (
+              <PaginationControls
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={recs.length}
+                itemsPerPage={ITEMS_PER_PAGE}
+                itemName="recomendaciones"
+                onPageChange={(page) => setPageForGroup(group, page)}
+              />
+            )}
+          </AccordionContent>
+        </AccordionItem>
+      );
+    };
+
+    const functionalGroupOrder: FunctionalGroup[] = ['campaigns', 'adgroups', 'ads', 'keywords', 'searchTerms', 'segments', 'assetGroups', 'assets'];
+
+    return (
+      <div className="space-y-6">
+        <Accordion type="multiple" defaultValue={[]} className="space-y-3">
+          {functionalGroupOrder.map(group => 
+            renderFunctionalGroupBlock(group, groupedRecommendations[group] || [])
+          )}
+        </Accordion>
       </div>
     );
   };
 
   return (
     <div className="space-y-0">
-      <div className="text-primary-foreground px-6 py-4 rounded-t-lg" style={{ backgroundColor: '#12BAA9' }}>
-        <h2 className="text-xl font-semibold text-white">
+      <div className="bg-primary text-primary-foreground px-6 py-4 rounded-t-lg">
+        <h2 className="text-xl font-semibold">
           Recomendaciones de IA ({isLoading ? '...' : getFilteredRecommendations.length})
-          <span className="text-sm font-normal opacity-90 ml-2">
-            • {getFilteredAppliedRecommendations.length} aplicadas
-            {lastFetch && (
-              <span className="ml-2 text-xs">
-                (Actualizado: {lastFetch.toLocaleTimeString()})
-              </span>
-            )}
-          </span>
+          {specificFilter && (
+            <span className="text-sm font-normal opacity-90 ml-2">
+              • Filtrado por {specificFilter.type === 'campaign' ? 'Campaña' : specificFilter.type === 'adgroup' ? 'Grupo de Anuncios' : 'Anuncio'}: {specificFilter.name}
+            </span>
+          )}
         </h2>
-        {specificFilter && (
-          <p className="text-sm text-white/90 mt-1">
-            Filtrando por: {specificFilter.name}
-          </p>
-        )}
       </div>
       
       <Card className="rounded-t-none border-t-0">
@@ -641,31 +587,21 @@ const getFilteredAppliedRecommendations = useMemo(() => {
                 onClick={() => setMainTab("pending")}
                 className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
                   mainTab === "pending"
-                    ? "bg-white text-white"
+                    ? "border-blue-500 text-blue-600 bg-white"
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
-                style={mainTab === "pending" ? { 
-                  borderBottomColor: '#12BAA9', 
-                  color: '#12BAA9',
-                  backgroundColor: 'white'
-                } : {}}
               >
-                Recomendaciones pendientes
+                📋 Recomendaciones pendientes
               </button>
               <button
                 onClick={() => setMainTab("applied")}
                 className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
                   mainTab === "applied"
-                    ? "bg-white text-white"
+                    ? "border-blue-500 text-blue-600 bg-white"
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
-                style={mainTab === "applied" ? { 
-                  borderBottomColor: '#12BAA9', 
-                  color: '#12BAA9',
-                  backgroundColor: 'white'
-                } : {}}
               >
-                Historial de aplicadas
+                ✅ Historial de aplicadas
               </button>
             </div>
           </div>
@@ -673,57 +609,18 @@ const getFilteredAppliedRecommendations = useMemo(() => {
           <div className="p-6">
             {mainTab === "pending" && (
               <div className="space-y-6">
-                {!isLoading && !error && allRecommendations.length > 0 && (
-                  <div className="flex flex-row gap-3 justify-between items-center mb-6">
-                    <FilterPopover
-                      filters={[
-                        {
-                          key: 'category',
-                          label: 'Categoría',
-                          value: categoryFilter,
-                          onChange: setCategoryFilter,
-                          options: [
-                            { value: 'all', label: 'Todas las categorías' },
-                            ...availableCategories.map(cat => ({
-                              value: cat,
-                              label: getCategoryLabel(cat)
-                            }))
-                          ]
-                        },
-                        {
-                          key: 'priority',
-                          label: 'Prioridad',
-                          value: priorityFilter,
-                          onChange: setPriorityFilter,
-                          options: [
-                            { value: 'all', label: 'Todas las prioridades' },
-                            ...availablePriorities.map(priority => ({
-                              value: priority,
-                              label: priority.charAt(0).toUpperCase() + priority.slice(1) + ' prioridad'
-                            }))
-                          ]
-                        }
-                      ]}
-                      onClearAll={() => {
-                        setCategoryFilter('all');
-                        setPriorityFilter('all');
-                      }}
-                    />
-                  </div>
-                )}
-
                 {renderRecommendationsList()}
               </div>
             )}
             
             {mainTab === "applied" && (
-              <AppliedRecommendationsHistory recommendations={getFilteredAppliedRecommendations} />
+              <AppliedRecommendationsHistory customerId={Number(accountId)} />
             )}
           </div>
         </CardContent>
-      </Card>
 
-      <RecommendationDetailModal />
+        <RecommendationDetailModal />
+      </Card>
     </div>
   );
 };

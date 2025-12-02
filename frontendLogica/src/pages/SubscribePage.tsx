@@ -21,7 +21,7 @@ const SubscribePage = () => {
         variant: "success",
       });
 
-      fetch("https://pwi.es/api/auth/activate-subscription", {
+      fetch("https://optimizalo.app/api/auth/activate-subscription", {
         method: "POST",
         credentials: "include",
       })
@@ -32,7 +32,7 @@ const SubscribePage = () => {
 
           // Forzar recarga del estado de usuario o sesión
           // Puedes llamar a un endpoint como /me si tienes uno
-          await fetch("https://pwi.es/api/auth/me", {
+          await fetch("https://optimizalo.app/api/auth/me", {
             credentials: "include",
           }).catch(() => {});
 
@@ -60,7 +60,7 @@ const SubscribePage = () => {
   const handleSubscribe = async () => {
     setLoading(true);
     try {
-      const res = await fetch("https://pwi.es/api/stripe/create-checkout-session", {
+      const res = await fetch("https://optimizalo.app/api/stripe/create-checkout-session", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

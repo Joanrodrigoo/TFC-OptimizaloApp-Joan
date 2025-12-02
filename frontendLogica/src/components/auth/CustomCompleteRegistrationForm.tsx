@@ -1,11 +1,9 @@
-
-import { useState } from "react";
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/components/ui/use-toast";
 import { useSearchParams } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
@@ -14,9 +12,9 @@ interface CustomCompleteRegistrationFormProps {
   onRegistrationComplete?: () => void;
 }
 
-
-const CustomCompleteRegistrationForm = ({}: CustomCompleteRegistrationFormProps) => {
+const CustomCompleteRegistrationForm = ({ onRegistrationComplete }: CustomCompleteRegistrationFormProps) => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const email = searchParams.get("email") || "";
   const token = searchParams.get("token") || "";
   
@@ -27,104 +25,101 @@ const CustomCompleteRegistrationForm = ({}: CustomCompleteRegistrationFormProps)
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
-  const navigate = useNavigate();
-
-  
-
-useEffect(() => {
-  const verifyToken = async () => {
-    if (!email || !token) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Parámetros de verificación faltantes.",
-      });
-      navigate("/error");
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `https://pwi.es/api/auth/verify-token?email=${encodeURIComponent(email)}&token=${token}`
-      );
-      const data = await response.json();
-
-      if (!response.ok || !data.valid) {
+  useEffect(() => {
+    const verifyToken = async () => {
+      if (!email || !token) {
         toast({
           variant: "destructive",
-          title: "Token inválido o expirado",
-          description: "Este enlace ya no es válido. Intenta registrarte nuevamente.",
+          title: "Error",
+          description: "Parámetros de verificación faltantes.",
         });
-        navigate("/expired"); // Redirige a una página de error amigable
+        navigate("/error");
+        return;
       }
-    } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Error de red",
-        description: "No se pudo verificar el enlace.",
-      });
-      navigate("/error");
-    }
-  };
 
-  verifyToken();
-}, [email, token, toast, navigate]);
+      try {
+        const response = await fetch(
+          `https://optimizalo.app/api/auth/verify-token?email=${encodeURIComponent(email)}&token=${token}`
+        );
+        const data = await response.json();
 
+        if (!response.ok || !data.valid) {
+          toast({
+            variant: "destructive",
+            title: "Token inválido o expirado",
+            description: "Este enlace ya no es válido. Intenta registrarte nuevamente.",
+          });
+          navigate("/expired");
+        }
+      } catch (err) {
+        toast({
+          variant: "destructive",
+          title: "Error de red",
+          description: "No se pudo verificar el enlace.",
+        });
+        navigate("/error");
+      }
+    };
+
+    verifyToken();
+  }, [email, token, toast, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-
-  if (password !== confirmPassword) {
-    toast({
-      variant: "destructive",
-      title: "Error de validación",
-      description: "Las contraseñas no coinciden. Por favor, inténtalo de nuevo.",
-    });
-    return;
-  }
-
-  setIsLoading(true);
-
-  try {
-    const response = await fetch("https://pwi.es/api/auth/register-complete", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email,
-        name,
-        password,
-        token,
-      }),
-    });
-
-    if (!response.ok) {
-      const data = await response.json();
-      throw new Error(data.error || "Error desconocido");
-    }
-
-    toast({
-      title: "Registro exitoso",
-      description: "¡Tu cuenta ha sido creada correctamente!",
-    });
-
-    setTimeout(() => {
-      navigate("/login");
-    }, 1500);
-
+    e.preventDefault();
     
+    if (password !== confirmPassword) {
+      toast({
+        variant: "destructive",
+        title: "Error de validación",
+        description: "Las contraseñas no coinciden. Por favor, inténtalo de nuevo.",
+      });
+      return;
+    }
+    
+    setIsLoading(true);
+    
+    try {
+      const response = await fetch("https://optimizalo.app/api/auth/register-complete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          name,
+          password,
+          token,
+        }),
+      });
 
-  } catch (error) {
-    toast({
-      variant: "destructive",
-      title: "Error de registro",
-      description: error.message || "Hubo un error al completar el registro.",
-    });
-  } finally {
-    setIsLoading(false);
-  }
-};
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Error desconocido");
+      }
+
+      toast({
+        title: "Registro exitoso",
+        description: "¡Tu cuenta ha sido creada correctamente!",
+      });
+
+      setTimeout(() => {
+        navigate("/login");
+      }, 1500);
+
+      if (onRegistrationComplete) {
+        onRegistrationComplete();
+      }
+      
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error de registro",
+        description: (error as Error).message || "Hubo un error al completar el registro.",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);

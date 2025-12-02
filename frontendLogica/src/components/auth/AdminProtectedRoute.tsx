@@ -10,7 +10,7 @@ const AdminProtectedRoute = () => {
   useEffect(() => {
     const checkLogin = async () => {
       try {
-        const res = await fetch("https://pwi.es/api/auth/status", {
+        const res = await fetch("https://optimizalo.app/api/auth/status", {
           credentials: "include",
         });
 
