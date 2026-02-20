@@ -1,0 +1,37 @@
+# Tasks
+
+- [x] Configure Local Environment (Done implicitly by planning)
+- [ ] Backend Refactoring (Priority 1)
+    - [x] Create directory structure `backend/src/{config,routes,controllers,services,middleware}`
+    - [x] Move `db.js` to `backend/src/config/db.js`
+    - [x] Extract OpenAI & Google Ads config to `backend/src/config/`
+    - [x] Move existing `middleware`, `routes`, `stripe`, `syncAccounts` to `src/`
+    - [ ] Split `index.js`:
+        - [x] Extract Auth routes (Verify paths)
+        - [x] Extract Stripe routes (Verify paths)
+        - [/] Extract Google Ads logic
+            - [x] Extract Sync Logic (`processSingleDay`, PMax) to `services/syncService.js` (Partial)
+            - [x] Extract API helpers to `services/googleAdsService.js`
+            - [x] Clean up deprecated code from `index.js`
+            - [x] Move `getGoogleAdsCustomer` to `src/utils/googleAdsHelpers.js`
+            - [x] Delete redundant logic (`fetchAndSave...`, `saveCampaign...`) from `index.js`
+            - [ ] Extract Routes from `index.js`:
+                - [x] `src/routes/campaigns.js` (Keywords, Search Terms, Audience)
+                - [x] `src/routes/adGroups.js` (Ads, Keywords, Audience)
+                - [x] `src/routes/googleAdsDebug.js` (Debug endpoints)
+                - [x] `src/routes/metadata.js` (Dates, Accounts)
+                - [ ] `src/routes/sync.js` (Sync control & status)
+                - [ ] `src/routes/analysis.js` (Analysis control & status)
+                - [ ] `src/routes/metrics.js` (General metrics)
+            - [ ] Extract PMax Logic to `src/services/googleAds/pmax.js`
+            - [ ] Extract Assets & Segments to `src/services/googleAds/assets.js` & `segments.js`
+            - [ ] Extract Campaign Settings to `src/services/googleAds/campaignSettings.js`
+            - [ ] Extract Entity Sync (Ads, Keywords) to `src/services/googleAds/entities.js`
+            - [ ] Extract Analysis/LLM Logic to `src/services/analysis/llmService.js`
+        - [x] Backend Refactoring Phase 2
+            - [x] Extract Logging logic to `src/services/logger.js`
+            - [x] Create `src/app.js` entry point
+- [ ] Frontend Refactoring (Priority 2)
+    - [ ] Audit `tsconfig.json`
+    - [ ] Refactor Components to Feature-based structure
+    - [ ] Fix TypeScript "any" usage
