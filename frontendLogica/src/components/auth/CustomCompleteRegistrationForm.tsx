@@ -39,7 +39,7 @@ const CustomCompleteRegistrationForm = ({ onRegistrationComplete }: CustomComple
 
       try {
         const response = await fetch(
-          `https://optimizalo.app/api/auth/verify-token?email=${encodeURIComponent(email)}&token=${token}`
+          `${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/verify-token?email=${encodeURIComponent(email)}&token=${token}`
         );
         const data = await response.json();
 
@@ -79,7 +79,7 @@ const CustomCompleteRegistrationForm = ({ onRegistrationComplete }: CustomComple
     setIsLoading(true);
     
     try {
-      const response = await fetch("https://optimizalo.app/api/auth/register-complete", {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/register-complete`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

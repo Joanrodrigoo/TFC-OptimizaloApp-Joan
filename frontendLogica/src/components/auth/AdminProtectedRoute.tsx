@@ -10,7 +10,7 @@ const AdminProtectedRoute = () => {
   useEffect(() => {
     const checkLogin = async () => {
       try {
-        const res = await fetch("https://optimizalo.app/api/auth/status", {
+        const res = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/status`, {
           credentials: "include",
         });
 

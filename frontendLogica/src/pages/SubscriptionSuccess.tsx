@@ -7,7 +7,7 @@ const SubscriptionSuccess = () => {
   useEffect(() => {
     const refreshSession = async () => {
       try {
-        const res = await fetch('https://optimizalo.app/api/auth/refresh-session', {
+        const res = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/refresh-session`, {
           method: 'GET',
           credentials: 'include'
         });

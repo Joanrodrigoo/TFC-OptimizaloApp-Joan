@@ -27,7 +27,7 @@ const UserProfileForm = () => {
   useEffect(() => {
     const fetchUserData = async () => {
       try {
-        const response = await fetch("https://optimizalo.app/api/auth/profile", {
+        const response = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/profile`, {
           method: "GET",
           credentials: "include",
         });
@@ -67,7 +67,7 @@ const UserProfileForm = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch("https://optimizalo.app/api/auth/profile", {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/profile`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -117,7 +117,7 @@ const UserProfileForm = () => {
     }
 
     try {
-      const response = await fetch("https://optimizalo.app/api/auth/change-password", {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/change-password`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

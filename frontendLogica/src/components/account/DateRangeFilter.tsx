@@ -62,7 +62,7 @@ const DateRangeFilter = ({ customerId, dateRange, onChange, disabled = false }: 
 
       try {
         setIsLoading(true);
-        const res = await fetch(`https://optimizalo.app/api/fechas-con-datos/${customerId}`);
+        const res = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/fechas-con-datos/${customerId}`);
         
         if (!res.ok) {
           throw new Error(`Error ${res.status}: ${res.statusText}`);

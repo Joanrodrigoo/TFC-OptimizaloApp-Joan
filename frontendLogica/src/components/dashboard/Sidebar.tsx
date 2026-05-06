@@ -36,7 +36,7 @@ const Sidebar = ({ className }) => {
   // Fetch cuentas
   const fetchAccounts = async () => {
     try {
-      const response = await fetch("https://optimizalo.app/api/google-accounts", {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/google-accounts`, {
         credentials: "include",
       });
       if (!response.ok) throw new Error("Error al obtener cuentas");
@@ -52,7 +52,7 @@ const Sidebar = ({ className }) => {
   // Fetch usuario
   const fetchUserData = async () => {
     try {
-      const response = await fetch("https://optimizalo.app/api/auth/profile", {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/profile`, {
         method: "GET",
         credentials: "include",
       });
@@ -221,7 +221,7 @@ const Sidebar = ({ className }) => {
           <Button
             className="w-full bg-teal-500 hover:bg-teal-600 text-white font-medium"
             onClick={() => {
-              window.location.href = "https://optimizalo.app/auth";
+              window.location.href = `${import.meta.env.VITE_FRONTEND_URL || "https://optimizalo.app"}/auth`;
             }}
           >
             <PlusCircle className="mr-3 h-4 w-4" />

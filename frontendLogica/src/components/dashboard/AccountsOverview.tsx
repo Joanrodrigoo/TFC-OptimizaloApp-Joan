@@ -44,7 +44,7 @@ const AccountsOverview = () => {
 
   const fetchAccounts = async () => {
     try {
-      const response = await fetch("https://optimizalo.app/api/google-accounts", {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/google-accounts`, {
         credentials: "include",
       });
       if (!response.ok) throw new Error("Error al obtener cuentas");
@@ -62,7 +62,7 @@ const AccountsOverview = () => {
   }, []);
 
   const handleConnectAccount = () => {
-    window.location.href = "https://optimizalo.app/auth";
+    window.location.href = `${import.meta.env.VITE_FRONTEND_URL || "https://optimizalo.app"}/auth`;
   };
 
   const handleSyncAccount = (accountId: string) => {

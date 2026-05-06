@@ -49,7 +49,7 @@ const SyncSummaryDashboard: React.FC<SyncSummaryDashboardProps> = ({
   const [summary, setSummary] = useState<SyncSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const apiUrl = "https://optimizalo.app";
+  const apiUrl = import.meta.env.VITE_API_URL || "https://optimizalo.app";
 
   const fetchSummary = async () => {
     try {

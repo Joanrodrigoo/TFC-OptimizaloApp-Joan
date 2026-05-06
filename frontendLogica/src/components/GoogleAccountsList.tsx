@@ -18,7 +18,7 @@ export default function GoogleAccountsList() {
   useEffect(() => {
     const fetchAccounts = async () => {
       try {
-        const response = await fetch("https://optimizalo.app/api/google-accounts", {
+        const response = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/google-accounts`, {
           credentials: "include",
         });
 

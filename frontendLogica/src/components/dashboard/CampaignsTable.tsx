@@ -67,7 +67,7 @@ export function CampaignsTable({ customerId }: RecentCampaignsTableProps) {
   const fetchCampaigns = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`https://optimizalo.app/api/google-ads-full-data?customerId=${customerId}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/google-ads-full-data?customerId=${customerId}`, {
         credentials: 'include',
       });
 

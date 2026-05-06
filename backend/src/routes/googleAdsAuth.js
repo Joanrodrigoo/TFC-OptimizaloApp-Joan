@@ -28,7 +28,7 @@ router.get("/auth", (req, res) => {
     access_type: "offline",
     prompt: "consent",
     scope: scopes,
-    redirect_uri: "https://optimizalo.app/oauth2callback",
+    redirect_uri: process.env.REDIRECT_URI || "https://optimizalo.app/oauth2callback",
     state,
   });
 
@@ -67,7 +67,7 @@ router.get("/oauth2callback", async (req, res) => {
     try {
       const result = await oauth2Client.getToken({
         code: oauthCode,
-        redirect_uri: "https://optimizalo.app/oauth2callback",
+        redirect_uri: process.env.REDIRECT_URI || "https://optimizalo.app/oauth2callback",
       });
       tokens = result.tokens;
       oauth2Client.setCredentials(tokens);

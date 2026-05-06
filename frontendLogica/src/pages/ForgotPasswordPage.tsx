@@ -30,7 +30,7 @@ const ForgotPasswordPage = () => {
     setIsLoading(true);
 
     try {
-      const res = await fetch("https://optimizalo.app/api/auth/forgot-password", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
@@ -82,7 +82,7 @@ const ForgotPasswordPage = () => {
     setIsLoading(true);
 
     try {
-      const res = await fetch("https://optimizalo.app/api/auth/reset-password", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/reset-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: effectiveEmail, token, newPassword: password }),

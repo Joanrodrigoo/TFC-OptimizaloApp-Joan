@@ -53,7 +53,7 @@ const EmailRegistrationForm = () => {
     try {
       console.log("Enviando solicitud con email:", email);
       
-      const res = await fetch("https://optimizalo.app/api/auth/register-start", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || "https://optimizalo.app"}/api/auth/register-start`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

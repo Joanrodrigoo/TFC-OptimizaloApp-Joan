@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-const API_URL = "https://optimizalo.app";
+const API_URL = import.meta.env.VITE_API_URL || "https://optimizalo.app";
 
 // ====================================
 // TYPES
