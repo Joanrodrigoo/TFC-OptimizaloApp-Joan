@@ -180,8 +180,8 @@ const SearchTermsList: React.FC<Props> = ({
 
   const filteredData = searchTerms.filter((term) => {
     const matchesSearch =
-      term.search_term.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      term.keyword_text.toLowerCase().includes(searchTerm.toLowerCase());
+      (term.search_term || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (term.keyword_text || '').toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesType = matchTypeFilter === "all" || term.match_type === matchTypeFilter;
     

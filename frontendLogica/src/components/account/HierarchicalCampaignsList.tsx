@@ -1263,7 +1263,7 @@ const HierarchicalCampaignsList = ({
   // RENDERIZADO DE CAMPAÑAS
   if (navigation.level === "campaigns") {
     const filteredCampaigns = campaigns.filter((campaign) => {
-      const matchesSearch = campaign.name
+      const matchesSearch = (campaign.name || '')
         .toLowerCase()
         .includes(searchTerm.toLowerCase());
       const matchesType = typeFilter === "all" || campaign.type === typeFilter;
@@ -1511,16 +1511,16 @@ const HierarchicalCampaignsList = ({
                         <TableCell>{campaign.ctr.toFixed(2)}%</TableCell>
                         <TableCell>
                           {campaign.tasa_conversion_porcentaje.toFixed(2)}%
-                        </TableCell>{" "}
+                        </TableCell>
                         {/* ✅ Tasa de Conversión */}
                         <TableCell>
                           {Math.round(campaign.conversions)}
                         </TableCell>
                         <TableCell>
                           {campaign.coste_por_conversion.toFixed(2)}€
-                        </TableCell>{" "}
+                        </TableCell>
                         {/* ✅ Coste/Conv */}
-                        <TableCell>{campaign.roas.toFixed(2)}</TableCell>{" "}
+                        <TableCell>{campaign.roas.toFixed(2)}</TableCell>
                         {/* ✅ ROAS */}
                         <TableCell
                           className="sticky right-0 border-l-2 border-r-2 border-t-2 border-b-2 text-center px-4 bg-white hover:bg-gray-50 cursor-pointer transition-colors duration-200"
@@ -1617,7 +1617,7 @@ const HierarchicalCampaignsList = ({
       }
 
       const filteredAssetGroups = assetGroups.filter((ag) => {
-        const matchesSearch = ag.assetGroupName
+        const matchesSearch = (ag.assetGroupName || '')
           .toLowerCase()
           .includes(searchTerm.toLowerCase());
 
@@ -1950,7 +1950,7 @@ const HierarchicalCampaignsList = ({
     }
 
     const filteredAdGroups = adGroups.filter((adGroup) => {
-      const matchesSearch = adGroup.name
+      const matchesSearch = (adGroup.name || '')
         .toLowerCase()
         .includes(searchTerm.toLowerCase());
       return matchesSearch;
@@ -2278,7 +2278,7 @@ const HierarchicalCampaignsList = ({
           (asset.textValue || "")
             .toLowerCase()
             .includes(searchTerm.toLowerCase()) ||
-          asset.fieldType.toLowerCase().includes(searchTerm.toLowerCase());
+          (asset.fieldType || '').toLowerCase().includes(searchTerm.toLowerCase());
         return matchesSearch;
       });
 
@@ -2630,8 +2630,8 @@ const HierarchicalCampaignsList = ({
 
     const filteredAds = ads.filter((ad) => {
       const matchesSearch =
-        ad.headline1.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        ad.headline2.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (ad.headline1 || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (ad.headline2 || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (ad.name && ad.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
       return matchesSearch;

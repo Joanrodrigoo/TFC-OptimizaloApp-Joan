@@ -6,8 +6,8 @@ dotenv.config();
 // 🔥 CONFIGURACIÓN ROBUSTA DEL POOL PARA ANÁLISIS DE IA
 const pool = mysql.createPool({
   host: process.env.DB_HOST || '127.0.0.1',
-  user: process.env.DB_USER || 'adminuser',
-  password: process.env.DB_PASSWORD || 'adminpassword',
+  user: process.env.DB_USER ?? 'adminuser',
+  password: process.env.DB_PASSWORD ?? 'adminpassword',
   database: process.env.DB_NAME || 'mi_saas',
   
   // ✅ Configuración de conexiones

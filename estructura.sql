@@ -467,9 +467,12 @@ CREATE TABLE `recomendaciones` (
   `impacto_estimado` varchar(100) DEFAULT NULL,
   `tipo_objeto` varchar(100) DEFAULT NULL,
   `objeto_id` varchar(100) DEFAULT NULL,
-  `estado` enum('activa','pendiente','resuelta','descartada') DEFAULT 'pendiente',
+  `estado` enum('activa','pendiente','resuelta','descartada','aplicada') DEFAULT 'pendiente',
   `fecha_aplicacion` datetime DEFAULT NULL,
   `fecha_creacion` datetime DEFAULT current_timestamp(),
+  `mejora_real` varchar(255) DEFAULT NULL,
+  `periodo_comparacion` varchar(255) DEFAULT NULL,
+  `variacion_kpi` float DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_recomendaciones_customer_estado` (`customer_id`,`estado`),
   KEY `idx_recomendaciones_prioridad` (`prioridad`)

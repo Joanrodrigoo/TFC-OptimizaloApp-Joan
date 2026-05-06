@@ -9,10 +9,10 @@ SET @cid = '1234567890';
 
 -- 1. USUARIO DEMO
 INSERT INTO users (id, email, name, password, is_active, role, created_at)
-VALUES (99, 'demo@techstorepro.com', 'Demo User',
+VALUES (99, 'demo@techstorepro.com', 'TechStore Pro',
         '$2b$10$YKN4QgK5J7w1dPJxuN6hWuZe4j8k2mXqR3sL9vA0cF1gH7iT8nO2e',
         1, 'user', NOW())
-ON DUPLICATE KEY UPDATE is_active=1, name='Demo User';
+ON DUPLICATE KEY UPDATE is_active=1, name='TechStore Pro';
 
 -- 2. SUSCRIPCIÓN ACTIVA
 INSERT INTO subscriptions (user_id, stripe_subscription_id, stripe_customer_id, plan, plan_name, status, current_period_start, current_period_end)
@@ -119,7 +119,7 @@ VALUES
 -- ============================================================
 DELETE FROM ad_groups WHERE customer_id = @cid;
 
-INSERT INTO ad_groups (customer_id, ad_group_id, campaign_id, name, status, date,
+INSERT INTO ad_groups (customer_id, ad_group_id, campaign_id, ad_group_name, status, date,
   impressions, clicks, cost_micros, conversions, ctr, average_cpc_micros)
 VALUES
 -- camp_001 ad groups
@@ -139,17 +139,17 @@ VALUES
 -- ============================================================
 DELETE FROM ads WHERE customer_id = @cid;
 
-INSERT INTO ads (customer_id, ad_id, ad_group_id, campaign_id, status, created_at,
+INSERT INTO ads (customer_id, ad_id, ad_group_id, campaign_id, status, date,
   impressions, clicks, cost_micros, conversions, ctr,
-  ad_headline_1, ad_headline_2, ad_description_1, final_url)
+  ad_headline, ad_description, final_url)
 VALUES
-(@cid,'ad_001','ag_001_a','camp_001','ENABLED', DATE_SUB(NOW(),INTERVAL 1 DAY), 1050,62,53940000,4,0.059,'Portátil Gaming RTX 4070','Envío Gratis 24h','Los mejores portátiles gaming al mejor precio. ¡Configura el tuyo!','https://techstorepro.com/portatiles-gaming'),
-(@cid,'ad_002','ag_001_a','camp_001','ENABLED', DATE_SUB(NOW(),INTERVAL 1 DAY),  980,55,47850000,3,0.056,'Gaming Laptop Outlet','Hasta -30% Esta Semana','Portátiles gaming reacondicionados con garantía. Stock limitado.','https://techstorepro.com/outlet'),
-(@cid,'ad_003','ag_001_b','camp_001','ENABLED', DATE_SUB(NOW(),INTERVAL 1 DAY),  920,48,41040000,2,0.052,'Portátil Gamer Barato','Cuotas Sin Interés','Financia tu portátil gaming en 12 meses sin intereses.','https://techstorepro.com/financiacion'),
-(@cid,'ad_004','ag_002_a','camp_002','ENABLED', DATE_SUB(NOW(),INTERVAL 1 DAY),  700,36,15300000,2,0.051,'Fundas iPhone 15','Protección Premium','Fundas originales para todos los modelos. Envío en 24h.','https://techstorepro.com/fundas'),
-(@cid,'ad_005','ag_002_b','camp_002','ENABLED', DATE_SUB(NOW(),INTERVAL 1 DAY),  550,28,11900000,1,0.051,'Cargador Rápido 65W','Compatible Todos Móviles','Carga tu móvil en 30 minutos. Tecnología GaN avanzada.','https://techstorepro.com/cargadores'),
-(@cid,'ad_006','ag_003_a','camp_003','ENABLED', DATE_SUB(NOW(),INTERVAL 1 DAY),  490,25,16250000,0,0.051,'Auriculares Sony WH-1000','Cancelación de Ruido','Sonido premium con hasta 30h de batería. Compra ahora.','https://techstorepro.com/auriculares'),
-(@cid,'ad_007','ag_003_b','camp_003','ENABLED', DATE_SUB(NOW(),INTERVAL 1 DAY),  445,20,13000000,0,0.045,'Auriculares Gaming Pro','7.1 Surround Virtual','Domina el juego con audio posicional. Micrófono retráctil.','https://techstorepro.com/gaming-audio');
+(@cid,'ad_001','ag_001_a','camp_001','ENABLED', DATE(DATE_SUB(NOW(),INTERVAL 1 DAY)), 1050,62,53940000,4,0.059,'Portátil Gaming RTX 4070 | Envío Gratis 24h','Los mejores portátiles gaming al mejor precio. ¡Configura el tuyo!','https://techstorepro.com/portatiles-gaming'),
+(@cid,'ad_002','ag_001_a','camp_001','ENABLED', DATE(DATE_SUB(NOW(),INTERVAL 1 DAY)),  980,55,47850000,3,0.056,'Gaming Laptop Outlet | Hasta -30% Esta Semana','Portátiles gaming reacondicionados con garantía. Stock limitado.','https://techstorepro.com/outlet'),
+(@cid,'ad_003','ag_001_b','camp_001','ENABLED', DATE(DATE_SUB(NOW(),INTERVAL 1 DAY)),  920,48,41040000,2,0.052,'Portátil Gamer Barato | Cuotas Sin Interés','Financia tu portátil gaming en 12 meses sin intereses.','https://techstorepro.com/financiacion'),
+(@cid,'ad_004','ag_002_a','camp_002','ENABLED', DATE(DATE_SUB(NOW(),INTERVAL 1 DAY)),  700,36,15300000,2,0.051,'Fundas iPhone 15 | Protección Premium','Fundas originales para todos los modelos. Envío en 24h.','https://techstorepro.com/fundas'),
+(@cid,'ad_005','ag_002_b','camp_002','ENABLED', DATE(DATE_SUB(NOW(),INTERVAL 1 DAY)),  550,28,11900000,1,0.051,'Cargador Rápido 65W | Compatible Todos Móviles','Carga tu móvil en 30 minutos. Tecnología GaN avanzada.','https://techstorepro.com/cargadores'),
+(@cid,'ad_006','ag_003_a','camp_003','ENABLED', DATE(DATE_SUB(NOW(),INTERVAL 1 DAY)),  490,25,16250000,0,0.051,'Auriculares Sony WH-1000 | Cancelación de Ruido','Sonido premium con hasta 30h de batería. Compra ahora.','https://techstorepro.com/auriculares'),
+(@cid,'ad_007','ag_003_b','camp_003','ENABLED', DATE(DATE_SUB(NOW(),INTERVAL 1 DAY)),  445,20,13000000,0,0.045,'Auriculares Gaming Pro | 7.1 Surround Virtual','Domina el juego con audio posicional. Micrófono retráctil.','https://techstorepro.com/gaming-audio');
 
 -- ============================================================
 -- 8. KEYWORDS (14 días, incluyendo problemáticas para que IA actúe)
@@ -238,7 +238,7 @@ VALUES
 -- ============================================================
 DELETE FROM asset_groups WHERE customer_id = @cid;
 
-INSERT INTO asset_groups (customer_id, asset_group_id, campaign_id, name, status, date, impressions, clicks, cost_micros, conversions)
+INSERT INTO asset_groups (customer_id, asset_group_id, campaign_id, asset_group_name, status, date, impressions, clicks, cost_micros, conversions)
 VALUES
 (@cid,'ag_pmax_1','camp_004','TechStore — Portátiles','ENABLED', DATE_SUB(CURDATE(),INTERVAL 1 DAY), 5800,235,226350000,18),
 (@cid,'ag_pmax_2','camp_004','TechStore — Accesorios','ENABLED', DATE_SUB(CURDATE(),INTERVAL 1 DAY), 3900,155,149220000, 9);
@@ -248,7 +248,7 @@ VALUES
 -- ============================================================
 DELETE FROM asset_group_assets WHERE customer_id = @cid;
 
-INSERT INTO asset_group_assets (customer_id, asset_group_id, asset_id, asset_type, asset_text, performance_label, date, impressions, clicks)
+INSERT INTO asset_group_assets (customer_id, asset_group_id, asset_id, field_type, text_value, performance_label, date, impressions, clicks)
 VALUES
 (@cid,'ag_pmax_1','asset_001','HEADLINE','Portátiles Gaming al Mejor Precio','BEST', DATE_SUB(CURDATE(),INTERVAL 1 DAY), 2100,88),
 (@cid,'ag_pmax_1','asset_002','HEADLINE','RTX 4070 | Envío Gratis 24h','GOOD', DATE_SUB(CURDATE(),INTERVAL 1 DAY), 1850,75),
@@ -264,12 +264,12 @@ VALUES
 -- ============================================================
 -- 13. LANGUAGES & LOCATIONS para campañas Search
 -- ============================================================
-INSERT IGNORE INTO campaign_languages (customer_id, campaign_id, language_code, language_name)
+INSERT IGNORE INTO campaign_languages (customer_id, campaign_id, code, name)
 VALUES
 (@cid,'camp_001','es','Spanish'), (@cid,'camp_001','ca','Catalan'),
 (@cid,'camp_002','es','Spanish'), (@cid,'camp_003','es','Spanish');
 
-INSERT IGNORE INTO campaign_locations (customer_id, campaign_id, location_id, location_name, location_type)
+INSERT IGNORE INTO campaign_locations (customer_id, campaign_id, geo_target_constant, name, target_type)
 VALUES
 (@cid,'camp_001',2724,'Spain','COUNTRY'), (@cid,'camp_001',20291,'Catalonia','REGION'),
 (@cid,'camp_002',2724,'Spain','COUNTRY'), (@cid,'camp_003',2724,'Spain','COUNTRY');

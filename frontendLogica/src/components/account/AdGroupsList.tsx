@@ -359,7 +359,7 @@ const AdGroupsList = ({
 
   // Filtrar y ordenar datos
   const filteredAdGroups = adGroups.filter(adGroup => {
-    const matchesSearch = adGroup.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = (adGroup.name || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === "all" || adGroup.status === statusFilter;
     return matchesSearch && matchesStatus;
   });

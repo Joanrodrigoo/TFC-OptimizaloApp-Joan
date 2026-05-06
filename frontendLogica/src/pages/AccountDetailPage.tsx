@@ -17,6 +17,8 @@ import RecommendationsPanel from "@/components/account/RecommendationsPanel";
 import DateRangeFilter from "@/components/account/DateRangeFilter";
 import { fetchGoogleAccounts } from "@/services/api";
 
+import { useToast } from "@/components/ui/use-toast";
+
 export interface NavigationState {
   level: "campaigns" | "adgroups" | "ads";
   selectedCampaign?: string;
@@ -108,6 +110,8 @@ const AccountDetailPage = () => {
     setIsSyncInProgress(visible);
   };
 
+  const { toast } = useToast();
+
   // Llamar al endpoint de análisis con IA (schedule-analysis ya existente)
   const handleAnalyzeAccount = async () => {
     if (!account || isAnalyzing) return;
@@ -120,14 +124,49 @@ const AccountDetailPage = () => {
         body: JSON.stringify({ customerId: account.accountId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // Esperar un momento y luego refrescar el panel de recomendaciones
-      setTimeout(() => {
-        setRefreshKey((prev) => prev + 1);
-        setIsAnalyzing(false);
-      }, 3000);
+
+      // Empezar a hacer polling para ver cuándo acaba el análisis
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`/api/analysis-status/${account.accountId}`);
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            
+            // Si ya no está ni pending ni processing, asumimos que terminó
+            if (statusData.pending === 0 && statusData.processing === 0) {
+              clearInterval(pollInterval);
+              
+              // Pedir las recomendaciones para ver cuántas son
+              try {
+                const recsRes = await fetch(`/api/recomendaciones/${account.accountId}`);
+                if (recsRes.ok) {
+                  const recsData = await recsRes.json();
+                  toast({
+                    title: "Análisis completado",
+                    description: `Se han generado ${recsData.length} recomendaciones nuevas con IA.`,
+                  });
+                }
+              } catch (e) {
+                console.error("Error obteniendo count de recomendaciones", e);
+              }
+              
+              setRefreshKey((prev) => prev + 1);
+              setIsAnalyzing(false);
+            }
+          }
+        } catch (pollErr) {
+          console.error("Error durante el polling:", pollErr);
+        }
+      }, 3000); // comprobar cada 3 segundos
+
     } catch (err) {
       console.error("Error lanzando análisis:", err);
       setIsAnalyzing(false);
+      toast({
+        title: "Error",
+        description: "No se pudo iniciar el análisis con IA.",
+        variant: "destructive"
+      });
     }
   };
 
@@ -215,7 +254,7 @@ const AccountDetailPage = () => {
         />
 
         {/* Recomendaciones de IA */}
-        <div id="recommendations">
+        <div id="recommendations" className="w-full min-w-0">
           <RecommendationsPanel
             key={`recommendations-${account.accountId}-${refreshKey}`}
             accountId={account.accountId}
@@ -225,8 +264,8 @@ const AccountDetailPage = () => {
         </div>
 
         {/* Estructura de campañas */}
-        <div id="campaigns">
-          <div className="overflow-x-auto">
+        <div id="campaigns" className="w-full min-w-0">
+          <div className="overflow-x-auto w-full">
             <HierarchicalCampaignsList
               key={`campaigns-${account.accountId}-${refreshKey}`}
               accountId={account.accountId}
@@ -267,10 +306,10 @@ const AccountDetailPage = () => {
 
         {/* Keywords, Términos de Búsqueda y Segmentación */}
         {navigation.selectedCampaign || navigation.selectedAdGroup ? (
-          <div className="space-y-6">
+          <div className="space-y-6 w-full min-w-0">
             {/* Solo mostrar Keywords si NO es Performance Max */}
             {selectedCampaignType !== 'PERFORMANCE_MAX' && (
-              <div id="keywords">
+              <div id="keywords" className="w-full min-w-0 overflow-x-auto">
                 <KeywordsList
                   key={`keywords-${account.accountId}-${navigation.selectedCampaign}-${navigation.selectedAdGroup}-${refreshKey}`}
                   accountId={account.accountId}
@@ -282,7 +321,7 @@ const AccountDetailPage = () => {
             
             {/* Solo mostrar Search Terms si NO es Performance Max */}
             {selectedCampaignType !== 'PERFORMANCE_MAX' && (
-              <div id="search-terms">
+              <div id="search-terms" className="w-full min-w-0 overflow-x-auto">
                 <SearchTermsList
                   key={`search-terms-${account.accountId}-${refreshKey}`}
                   accountId={account.accountId}
@@ -294,7 +333,7 @@ const AccountDetailPage = () => {
             
             {/* Solo mostrar Audiences si NO es Performance Max */}
             {selectedCampaignType !== 'PERFORMANCE_MAX' && (
-              <div id="audiences">
+              <div id="audiences" className="w-full min-w-0 overflow-x-auto">
                 <AudiencesList
                   key={`audiences-${account.accountId}-${refreshKey}`}
                   accountId={account.accountId}

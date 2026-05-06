@@ -456,23 +456,23 @@ const RecommendationsPanel = ({ accountId, navigation, onNavigationChange, speci
       const isApplied = rec.estado === 'aplicada';
       
       return (
-        <div key={rec.id} className="flex items-start gap-3 p-4 rounded-lg border bg-card hover:bg-accent/5 transition-colors">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <h4 className="font-semibold text-sm mb-1">{rec.titulo}</h4>
-                <p className="text-xs text-muted-foreground mb-2">{rec.descripcion}</p>
+        <div key={rec.id} className="flex flex-col sm:flex-row items-start gap-3 p-4 rounded-lg border bg-card hover:bg-accent/5 transition-colors">
+          <div className="flex-1 w-full min-w-0">
+            <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
+              <div className="flex-1 w-full min-w-0">
+                <h4 className="font-semibold text-sm mb-1 break-words">{rec.titulo}</h4>
+                <p className="text-xs text-muted-foreground mb-2 break-words line-clamp-3">{rec.descripcion}</p>
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="outline" className="text-xs">
                     {getEntityTypeLabel(rec.tipo_objeto)}
                   </Badge>
-                  <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50 text-xs">
+                  <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50 text-xs break-all">
                     {rec.impacto_estimado}
                   </Badge>
                 </div>
               </div>
               
-              <div className="flex gap-2 shrink-0">
+              <div className="flex gap-2 shrink-0 self-end sm:self-start mt-3 sm:mt-0">
                 <Button 
                   variant="ghost" 
                   size="sm"
@@ -491,10 +491,11 @@ const RecommendationsPanel = ({ accountId, navigation, onNavigationChange, speci
                   {isApplying ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : isApplied ? (
-                    <CheckCircle className="h-3.5 w-3.5" />
+                    <CheckCircle className="h-3.5 w-3.5 mr-1" />
                   ) : (
                     "Aplicar"
                   )}
+                  {isApplied && "Aplicada"}
                 </Button>
               </div>
             </div>
@@ -581,11 +582,11 @@ const RecommendationsPanel = ({ accountId, navigation, onNavigationChange, speci
       
       <Card className="rounded-t-none border-t-0">
         <CardContent className="p-0">
-          <div className="border-b bg-gray-50">
-            <div className="flex">
+          <div className="border-b bg-gray-50 overflow-x-auto">
+            <div className="flex min-w-max">
               <button
                 onClick={() => setMainTab("pending")}
-                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
+                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                   mainTab === "pending"
                     ? "border-blue-500 text-blue-600 bg-white"
                     : "border-transparent text-gray-500 hover:text-gray-700"
@@ -595,7 +596,7 @@ const RecommendationsPanel = ({ accountId, navigation, onNavigationChange, speci
               </button>
               <button
                 onClick={() => setMainTab("applied")}
-                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
+                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                   mainTab === "applied"
                     ? "border-blue-500 text-blue-600 bg-white"
                     : "border-transparent text-gray-500 hover:text-gray-700"

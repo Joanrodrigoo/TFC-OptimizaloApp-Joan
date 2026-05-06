@@ -1828,7 +1828,17 @@ router.get("/recomendaciones-aplicadas/:customer_id", async (req, res) => {
       [customer_id]
     );
 
-    res.json(rows);
+    const formattedRows = rows.map(r => ({
+      ...r,
+      resultado: {
+        estado: 'improved',
+        mejora_real: r.mejora_real || r.impacto_estimado,
+        periodo_comparacion: r.periodo_comparacion || "7 días",
+        variacion_kpi: r.variacion_kpi || 0
+      }
+    }));
+
+    res.json(formattedRows);
   } catch (error) {
     console.error("Error al obtener recomendaciones aplicadas:", error);
     res
@@ -1839,6 +1849,7 @@ router.get("/recomendaciones-aplicadas/:customer_id", async (req, res) => {
 
 router.post("/recomendaciones/:id/aplicar", async (req, res) => {
   const { id } = req.params;
+  const { resultado } = req.body || {};
 
   if (!id) {
     return res.status(400).json({ message: "El parámetro id es requerido" });
@@ -1867,9 +1878,18 @@ router.post("/recomendaciones/:id/aplicar", async (req, res) => {
     // Actualizar la recomendación
     await pool.query(
       `UPDATE recomendaciones
-       SET estado = 'aplicada', fecha_aplicacion = NOW()
+       SET estado = 'aplicada', 
+           fecha_aplicacion = NOW(),
+           mejora_real = ?,
+           periodo_comparacion = ?,
+           variacion_kpi = ?
        WHERE id = ?`,
-      [id]
+      [
+        resultado?.mejora_real || null,
+        resultado?.periodo_comparacion || null,
+        resultado?.variacion_kpi || null,
+        id
+      ]
     );
 
     res.json({

@@ -7,17 +7,20 @@ dotenv.config();
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { demoConfig } from "../../config/demoConfig.js";
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+let openai = null;
+if (process.env.OPENAI_API_KEY) {
+    openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+    });
+}
 
 // Inicializar Gemini solo si la API key está configurada
 let geminiModel = null;
 if (process.env.GEMINI_API_KEY) {
     try {
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        geminiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-        console.log("✅ Gemini AI inicializado correctamente");
+        geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+        console.log("✅ Gemini AI inicializado correctamente (gemini-2.5-flash-lite)");
     } catch (e) {
         console.warn("⚠️ No se pudo inicializar Gemini:", e.message);
     }
@@ -166,7 +169,7 @@ export async function callGemini({ name, system, payload, temperature = 0.2 }) {
 
         return {
             arr: parsed,
-            usage: { provider: "gemini", model: "gemini-2.0-flash" },
+            usage: { provider: "gemini", model: "gemini-2.5-flash-lite" },
         };
     } catch (error) {
         console.error(`Error in callGemini for ${name}:`, error.message);

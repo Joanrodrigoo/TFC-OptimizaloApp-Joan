@@ -419,10 +419,10 @@ const AdsList = ({
 
   // Filtrar y ordenar datos
   const filteredAds = ads.filter(ad => {
-    const matchesSearch = ad.headline1.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      ad.headline2.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = (ad.headline1 || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (ad.headline2 || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (ad.name && ad.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      ad.description.toLowerCase().includes(searchTerm.toLowerCase());
+      (ad.description || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === "all" || ad.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
