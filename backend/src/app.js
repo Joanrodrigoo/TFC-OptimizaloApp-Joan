@@ -37,7 +37,7 @@ const app = express();
 // Middlewares
 app.use(
     cors({
-        origin: "https://optimizalo.app",
+        origin: process.env.FRONTEND_URL || "https://optimizalo.app",
         credentials: true,
         methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
@@ -58,9 +58,11 @@ app.use(
         resave: false,
         saveUninitialized: false,
         cookie: {
-            secure: true, // HTTPS
-            sameSite: "none", // ✅ CAMBIO CLAVE: 'none' en lugar de 'lax'
-            httpOnly: true, // Seguridad extra
+            // En producción HTTPS es obligatorio; en local (http://localhost) lo desactivamos
+            secure: process.env.NODE_ENV === "production",
+            // 'none' permite cross-site en producción; 'lax' funciona en localhost
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+            httpOnly: true,
             maxAge: 24 * 60 * 60 * 1000, // 24 horas
         },
     })

@@ -1,4 +1,4 @@
-﻿import express from "express";
+import express from "express";
 import pool from "../config/db.js";
 import analysisQueue from "../services/analysisQueue/analysisQueueInstance.js";
 import {
@@ -6,7 +6,8 @@ import {
   getAnalysisStatus
 } from "../services/analysisQueue/analysisUtils.js";
 import { cleanCustomerId } from "../utils/googleAdsHelpers.js";
-import { callLLM, saveRecommendationsToDB, extractJson, normalizeRec, inferCategoria, stripFences } from "../services/analysis/llmService.js";
+import { callLLM, callAI, saveRecommendationsToDB, extractJson, normalizeRec, inferCategoria, stripFences } from "../services/analysis/llmService.js";
+
 import { getGoogleAdsCustomer } from "../utils/googleAdsHelpers.js";
 import { safeQuery } from "../utils/queryUtils.js";
 
@@ -1476,7 +1477,8 @@ REGLAS ESPECÍFICAS PMAX (ASSETS):
     const llmCalls = [];
 
     const addCall = (name, system, payload) => {
-      llmCalls.push({ name, promise: callLLM({ name, system, payload }) });
+      llmCalls.push({ name, promise: callAI({ name, system, payload }) });
+
     };
 
     // Agregar llamadas solo si hay datos

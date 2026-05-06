@@ -4,6 +4,8 @@ import { subDays } from "date-fns";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Loader2, Brain } from "lucide-react";
 import SyncProgressBar from "@/components/account/SyncProgressBar";
 
 import AccountMetrics from "@/components/account/AccountMetrics";
@@ -41,6 +43,7 @@ const AccountDetailPage = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [isSyncVisible, setIsSyncVisible] = useState(false);
   const [isSyncInProgress, setIsSyncInProgress] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const yesterday = subDays(new Date(), 1);
 
@@ -105,6 +108,29 @@ const AccountDetailPage = () => {
     setIsSyncInProgress(visible);
   };
 
+  // Llamar al endpoint de análisis con IA (schedule-analysis ya existente)
+  const handleAnalyzeAccount = async () => {
+    if (!account || isAnalyzing) return;
+    setIsAnalyzing(true);
+    try {
+      const res = await fetch("/api/schedule-analysis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ customerId: account.accountId }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Esperar un momento y luego refrescar el panel de recomendaciones
+      setTimeout(() => {
+        setRefreshKey((prev) => prev + 1);
+        setIsAnalyzing(false);
+      }, 3000);
+    } catch (err) {
+      console.error("Error lanzando análisis:", err);
+      setIsAnalyzing(false);
+    }
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -159,6 +185,25 @@ const AccountDetailPage = () => {
               onChange={setDateRange}
               disabled={isSyncInProgress}
             />
+            {/* Botón Analizar con IA — llama al endpoint de analysis ya existente */}
+            <Button
+              id="btn-analyze-account"
+              onClick={handleAnalyzeAccount}
+              disabled={isAnalyzing || isSyncInProgress}
+              className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white gap-2"
+            >
+              {isAnalyzing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Analizando...
+                </>
+              ) : (
+                <>
+                  <Brain className="h-4 w-4" />
+                  Analizar con IA
+                </>
+              )}
+            </Button>
           </div>
         </div>
 

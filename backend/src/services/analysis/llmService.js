@@ -3,9 +3,25 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// ─── Gemini (demo alternativo) ───────────────────────────────────────────────
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { demoConfig } from "../../config/demoConfig.js";
+
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
+
+// Inicializar Gemini solo si la API key está configurada
+let geminiModel = null;
+if (process.env.GEMINI_API_KEY) {
+    try {
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        geminiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+        console.log("✅ Gemini AI inicializado correctamente");
+    } catch (e) {
+        console.warn("⚠️ No se pudo inicializar Gemini:", e.message);
+    }
+}
 
 /**
  * Strip fences from markdown strings
@@ -117,6 +133,59 @@ export async function callLLM({
         console.error(`Error in callLLM for ${name}:`, error.message);
         throw error;
     }
+}
+
+/**
+ * Call Gemini LLM (alternativa gratuita para demo/presentación)
+ * Misma firma que callLLM para ser completamente intercambiable.
+ */
+export async function callGemini({ name, system, payload, temperature = 0.2 }) {
+    if (!geminiModel) {
+        console.error("❌ Gemini no está inicializado. Verifica GEMINI_API_KEY en .env");
+        throw new Error("GEMINI_API_KEY no configurada o inválida");
+    }
+
+    // Gemini usa un prompt único combinando system + datos de usuario
+    const prompt = `${system}\n\n--- DATOS A ANALIZAR ---\n${JSON.stringify(payload)}`;
+
+    try {
+        const result = await geminiModel.generateContent({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: { temperature },
+        });
+
+        const raw = result.response.text()?.trim() || "[]";
+        let parsed = [];
+        try {
+            parsed = JSON.parse(stripFences(raw));
+            if (!Array.isArray(parsed)) parsed = [];
+        } catch (e) {
+            console.error(`${name} Gemini JSON parse error`, e.message, raw.slice(0, 300));
+            parsed = [];
+        }
+
+        return {
+            arr: parsed,
+            usage: { provider: "gemini", model: "gemini-2.0-flash" },
+        };
+    } catch (error) {
+        console.error(`Error in callGemini for ${name}:`, error.message);
+        throw error;
+    }
+}
+
+/**
+ * Router de IA: usa OpenAI o Gemini según LLM_PROVIDER en .env
+ * Este es el punto de entrada que deben usar todas las rutas de análisis.
+ */
+export async function callAI(params) {
+    const provider = demoConfig.llmProvider;
+    console.log(`🤖 Proveedor IA activo: ${provider.toUpperCase()}`);
+
+    if (provider === "gemini") {
+        return callGemini(params);
+    }
+    return callLLM(params);
 }
 
 /**

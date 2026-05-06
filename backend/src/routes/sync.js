@@ -6,6 +6,8 @@ import {
     createDailyTask,
     getSyncStatus
 } from "../services/syncAccounts/syncUtils.js";
+import { demoConfig } from "../config/demoConfig.js";
+
 
 const router = express.Router();
 
@@ -173,6 +175,93 @@ router.get("/sync-status/:customerId", async (req, res) => {
     } catch (error) {
         console.error("❌ Error obteniendo estado:", error);
         res.status(500).json({ error: "Error interno", details: error.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEMO MODE: Sincronización Simulada
+// Inserta tareas en sync_queue y las marca como completadas progresivamente
+// para que el SyncProgressBar del frontend muestre la barra de progreso real.
+// No llama a ninguna API externa.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/start-demo-sync", async (req, res) => {
+    if (!demoConfig.enabled) {
+        return res.status(403).json({ error: "Demo mode no está activado. Pon DEMO_MODE=true en .env" });
+    }
+
+    const { customerId } = req.body;
+    if (!customerId) {
+        return res.status(400).json({ error: "customerId es requerido" });
+    }
+
+    try {
+        // 1. Limpiar tareas anteriores de este customer para evitar conflictos
+        await pool.execute(
+            "DELETE FROM sync_queue WHERE customer_id = ? AND status IN ('pending', 'failed')",
+            [customerId]
+        );
+
+        // 2. Insertar N tareas semanales en estado 'pending'
+        const weeks = demoConfig.syncWeeks;
+        const now = new Date();
+        const insertedIds = [];
+
+        for (let i = 0; i < weeks; i++) {
+            const endDate = new Date(now);
+            endDate.setDate(endDate.getDate() - i * 7);
+            const startDate = new Date(endDate);
+            startDate.setDate(startDate.getDate() - 6);
+
+            const startStr = startDate.toISOString().slice(0, 10);
+            const endStr = endDate.toISOString().slice(0, 10);
+
+            try {
+                const [result] = await pool.execute(
+                    `INSERT IGNORE INTO sync_queue
+                     (customer_id, start_date, end_date, week_number, task_type, status, attempts)
+                     VALUES (?, ?, ?, ?, 'weekly', 'pending', 0)`,
+                    [customerId, startStr, endStr, i + 1]
+                );
+                if (result.insertId) insertedIds.push(result.insertId);
+            } catch (insertErr) {
+                // Ignorar duplicados (UNIQUE constraint)
+            }
+        }
+
+        // 3. Completar las tareas progresivamente en background
+        //    Una cada stepMs milisegundos → simula el progreso en la barra
+        const stepMs = Math.floor(demoConfig.syncDurationMs / Math.max(weeks, 1));
+
+        (async () => {
+            for (let i = 0; i < insertedIds.length; i++) {
+                await new Promise(resolve => setTimeout(resolve, stepMs));
+                try {
+                    await pool.execute(
+                        `UPDATE sync_queue
+                         SET status = 'completed', completed_at = NOW(), started_at = DATE_SUB(NOW(), INTERVAL ? SECOND)
+                         WHERE id = ?`,
+                        [Math.floor(stepMs / 1000), insertedIds[i]]
+                    );
+                    console.log(`📊 [DEMO SYNC] Semana ${i + 1}/${insertedIds.length} completada`);
+                } catch (updateErr) {
+                    console.error(`❌ [DEMO SYNC] Error actualizando tarea ${insertedIds[i]}:`, updateErr.message);
+                }
+            }
+            console.log("✅ [DEMO SYNC] Sincronización simulada completada");
+        })();
+
+        // 4. Responder inmediatamente para que el frontend empiece a pollear
+        return res.status(200).json({
+            message: "Sincronización demo iniciada",
+            customerId,
+            weeks,
+            stepMs,
+            totalDurationMs: demoConfig.syncDurationMs,
+        });
+
+    } catch (error) {
+        console.error("❌ Error en start-demo-sync:", error);
+        return res.status(500).json({ error: "Error interno", details: error.message });
     }
 });
 

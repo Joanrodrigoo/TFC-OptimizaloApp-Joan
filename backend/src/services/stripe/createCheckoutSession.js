@@ -60,8 +60,8 @@ router.post('/create-checkout-session', async (req, res) => {
           quantity: 1
         }
       ],
-      success_url: 'https://optimizalo.app/subscription/success',
-      cancel_url: 'https://optimizalo.app/subscription/canceled',
+      success_url: `${process.env.FRONTEND_URL || 'https://optimizalo.app'}/subscription/success`,
+      cancel_url: `${process.env.FRONTEND_URL || 'https://optimizalo.app'}/subscription/canceled`,
     });
 
     res.json({ url: session.url });

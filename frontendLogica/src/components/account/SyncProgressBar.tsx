@@ -62,7 +62,7 @@ const SyncProgressBar = ({
     const fetchStatus = async () => {
       try {
         const response = await fetch(
-          `https://optimizalo.app/api/sync-status/${customerId}`,
+          `/api/sync-status/${customerId}`,
           {
             credentials: "include",
           }
@@ -129,7 +129,7 @@ const SyncProgressBar = ({
   const handleRetry = async () => {
     try {
       const response = await fetch(
-        `https://optimizalo.app/api/sync-queue/${customerId}/retry`,
+        `/api/sync-queue/${customerId}/retry`,
         {
           method: "POST",
           credentials: "include",
