@@ -9,6 +9,7 @@ out/
 
 # === VARIABLES DE ENTORNO ===
 .env
+**/.env
 .env.local
 .env.production
 
